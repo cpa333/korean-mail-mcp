@@ -37,6 +37,15 @@ AI 에이전트가 네이버·다음 메일을 읽고, 답장·새 메일 초안
 | 소스 저장소 | `github.com/cpa333/korean-mail-mcp` (개발 중 비공개, 배포 때 공개) |
 | 런타임 | Node.js 22 이상 |
 | 배포 | GitHub Actions Trusted Publishing, provenance 포함. 의존성을 한 파일로 번들해 배포(사용자 PC가 설치 때 다른 패키지를 받지 않게) |
+| 배포 파일 | `dist/index.cjs`, `README.md`, `LICENSE`(MIT, 저작권자 `cpa333`)만 넣는다 |
+
+### 3-0. 배포 절차
+npm은 아직 없는 패키지 이름에 Trusted Publisher를 등록할 수 없으므로(2026-11-16 확인), 첫 배포만 사람이 직접 한다.
+1. **첫 배포(사용자, 1회):** 프로젝트 폴더에서 `npm login`(npm 계정 패스키 인증) → `npm publish --access public`. `prepublishOnly`가 타입 검사·테스트·빌드를 먼저 돌려 실패하면 배포하지 않는다.
+2. **Trusted Publisher 등록(사용자, 1회):** npmjs.com → 패키지 설정 → Trusted Publisher → GitHub Actions, 저장소 `cpa333/korean-mail-mcp`, 워크플로 `publish.yml`. 등록 뒤 2일 안에 이 방식으로 첫 배포를 해야 하고, 넘기면 지우고 다시 등록한다.
+3. **저장소 공개:** provenance(출처 증명)는 공개 저장소에서만 붙으므로 2번 다음 배포 전에 공개로 바꾼다.
+4. **이후 배포:** `package.json`의 버전을 올려 커밋하고 같은 버전의 태그(`v0.1.1` 등)를 올리면 GitHub Actions가 타입 검사·테스트·빌드 후 provenance를 붙여 배포한다. 태그와 `package.json` 버전이 다르면 배포하지 않는다. 배포 권한 토큰은 어디에도 저장하지 않는다(npm CLI 11.5.1 이상의 OIDC 사용).
+5. 처음 배포한 뒤 npm 계정 설정에서 토큰 배포를 막아 두면(패키지 설정 → Publishing access → 2FA 필수·토큰 금지) Trusted Publisher 말고는 배포할 수 없다.
 
 ### 3-1. 설정 명령 (`setup`)
 
@@ -272,7 +281,7 @@ Cc  = reply_all이면 (원본 To ∪ 원본 Cc) 순서대로 제외·중복을 �
 |---|---|---|
 | 1 | 네이버 아이디만으로 로그인 성공 | ✅ 2026-11-16 |
 | 2 | 다음 `@daum.net`·`@hanmail.net` 로그인 형식 | ✅ 2026-11-16 `@hanmail.net` 전체 주소. `@daum.net`은 계정이 없어 미확인 |
-| 3 | 비밀번호 틀림·IMAP 꺼짐 때 서버 응답 | |
+| 3 | 비밀번호 틀림·IMAP 꺼짐 때 서버 응답 | 비밀번호 틀림: ✅ 2026-11-16 두 서비스 모두 "로그인이 거절되었습니다" 안내. IMAP 꺼짐은 미확인 |
 | 4 | 두 서비스의 폴더 이름과 특수 용도(`\Drafts`, `\Sent`) | ✅ 2026-11-16 두 서비스 모두 `Drafts`·`Sent Messages`·`Deleted Messages`에 특수 용도 있음. 한글 폴더 이름 정상 |
 | 5 | `readOnly` + `BODY.PEEK`로 읽은 뒤 웹메일에서 안 읽음 유지 | ✅ 2026-11-16 서버·네이버 웹메일 모두 안 읽음 유지 |
 | 6 | `SINCE`·`BEFORE`·`UNSEEN` 검색 결과 | ✅ 2026-11-16 |

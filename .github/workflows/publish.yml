@@ -1,0 +1,26 @@
+name: publish
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  # npm Trusted Publishing(OIDC)과 provenance에 필요하다. 배포 토큰은 쓰지 않는다.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted Publishing은 npm CLI 11.5.1 이상이 필요하다.
+      - run: npm install -g npm@latest
+      - name: 태그와 package.json 버전이 같은지 확인
+        run: node -e "const v = 'v' + require('./package.json').version; if (v !== process.env.GITHUB_REF_NAME) { console.error(v + ' != ' + process.env.GITHUB_REF_NAME); process.exit(1); }"
+      - run: npm ci
+      - run: npm publish --provenance --access public

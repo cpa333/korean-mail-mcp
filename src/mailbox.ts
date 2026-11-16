@@ -55,7 +55,7 @@ interface Range {
 }
 
 /**
- * 서버에는 날짜와 안 읽음만 묻고, 보낸사람·제목은 받아 온 ENVELOPE에서 거른다.
+ * 서버에는 날짜와 안 읽음만 묻고, 보낸 사람·제목은 받아 온 ENVELOPE에서 거른다.
  * 한글 SEARCH를 서비스마다 믿을 수 없어서다 (PRD §6-3).
  */
 export async function searchMessages(

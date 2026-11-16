@@ -39,7 +39,7 @@ const NETWORK_CODES = new Set([
   'EPIPE',
 ]);
 
-const AUTH_REJECTED_MESSAGE = '로그인이 거절됐습니다. 앱 비밀번호와 IMAP 사용 설정을 확인해 주세요.';
+const AUTH_REJECTED_MESSAGE = '로그인이 거절되었습니다. 앱 비밀번호와 IMAP 사용 설정을 확인해 주세요.';
 
 /** 사용자에게 그대로 보여 줄 수 있는 오류. 비밀번호나 메일 내용을 담지 않는다. */
 export class MailError extends Error {}
@@ -77,7 +77,7 @@ export function toMailError(account: Account, error: unknown): MailError {
   if (e.responseStatus === 'NO' || e.responseStatus === 'BAD') {
     return new MailError(prefix + `메일 서버가 요청을 거절했습니다: ${e.responseText ?? ''}`);
   }
-  return new MailError(prefix + `알 수 없는 오류: ${e.message ?? String(error)}`);
+  return new MailError(prefix + `알 수 없는 오류가 발생했습니다: ${e.message ?? String(error)}`);
 }
 
 function keyOf(account: Account): string {

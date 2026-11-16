@@ -36,7 +36,7 @@ async function setup(): Promise<void> {
   } catch (error) {
     // Ctrl+C로 질문을 빠져나가면 inquirer가 ExitPromptError를 던진다.
     if (error instanceof Error && error.name === 'ExitPromptError') process.exit(1);
-    console.error(`\n설정을 끝내지 못했습니다: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`\n설정을 완료하지 못했습니다:${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
   // 브라우저를 여는 하위 프로세스 등이 남아 있어도 설정은 끝났으므로 바로 나간다.

@@ -24,7 +24,7 @@ const SERVICES: Record<ServiceId, Service> = {
       "1. IMAP 켜기: 네이버 메일 → 환경설정 → POP3/IMAP 설정 → IMAP/SMTP 사용 → '사용함'",
       '2. 앱 비밀번호 만들기(2단계 인증이 꺼져 있으면 먼저 켭니다):',
       "   네이버 내정보 → 보안설정 → 2단계 인증 '관리' → 애플리케이션 비밀번호 관리",
-      "   → '직접 입력'에 10자 이내 이름(예: mailmcp) → 생성. 비밀번호는 한 번만 보이니 바로 복사하세요.",
+      "   → '직접 입력'에 10자 이내 이름(예: mailmcp) → 생성. 비밀번호는 한 번만 표시되므로 바로 복사해 주세요.",
     ],
     guideUrl: 'https://help.naver.com/service/5640/contents/8584?osType=COMMONOS',
     authHint: '네이버 로그인 비밀번호가 아니라 애플리케이션 비밀번호를 넣었는지, IMAP을 사용함으로 설정했는지 확인해 주세요.',
@@ -37,8 +37,8 @@ const SERVICES: Record<ServiceId, Service> = {
     setupSteps: [
       "1. IMAP 켜기: 다음 메일 → 환경설정 → IMAP/POP3 → IMAP/SMTP 사용 → '사용함' → 저장",
       '2. 앱 비밀번호 만들기: 다음 회원 → 마이페이지 → 계정 보안 → 앱 비밀번호',
-      '   → 휴대폰 2차 인증 → 이름 입력(예: mailmcp) → 생성. 비밀번호는 한 번만 보이니 바로 복사하세요.',
-      '   (2025-12-01부터 다음 메일 앱 비밀번호는 여기서만 만듭니다. 카카오계정에서 만든 것은 안 됩니다)',
+      '   → 휴대폰 2차 인증 → 이름 입력(예: mailmcp) → 생성. 비밀번호는 한 번만 표시되므로 바로 복사해 주세요.',
+      '   (2025-12-01부터 다음 메일 앱 비밀번호는 여기서만 만듭니다. 카카오계정에서 만든 비밀번호는 사용할 수 없습니다)',
     ],
     guideUrl: 'https://cs.daum.net/faq/43/9234.html?faqId=31143',
     authHint: '다음 회원 마이페이지에서 만든 앱 비밀번호인지(카카오계정에서 만든 비밀번호는 사용할 수 없습니다), IMAP을 사용함으로 설정했는지 확인해 주세요.',
@@ -96,11 +96,11 @@ export function loadAccounts(env: Record<string, string | undefined>): LoadedAcc
     const email = env[keys.email]?.trim();
     const password = env[keys.password]?.trim();
     if (!email || !password) {
-      warnings.push(`${keys.email}과 ${keys.password}를 둘 다 넣어야 합니다. 이 계정은 건너뜁니다.`);
+      warnings.push(`다음 두 값을 모두 넣어야 합니다: ${keys.email}, ${keys.password}. 이 계정은 건너뜁니다.`);
     } else if (!email.includes('@')) {
-      warnings.push(`${keys.email}에는 메일 주소 전체를 넣어야 합니다. 이 계정은 건너뜁니다.`);
+      warnings.push(`메일 주소 전체를 넣어야 합니다: ${keys.email}. 이 계정은 건너뜁니다.`);
     } else if (accounts.some((a) => sameEmail(a.email, email))) {
-      warnings.push(`${email}이(가) 두 번 설정되어 ${keys.email}은 건너뜁니다.`);
+      warnings.push(`같은 메일 주소가 두 번 설정되어 있어 뒤의 항목은 건너뜁니다: ${email} (${keys.email})`);
     } else {
       accounts.push(makeAccount(service, email, password, slot));
     }
@@ -126,7 +126,7 @@ export function accountList(accounts: Account[]): string {
 }
 
 export function unknownAccountMessage(email: string, accounts: Account[]): string {
-  return `${email}는 설정된 계정이 아닙니다. 설정된 계정: ${accountList(accounts)}. 계정을 더하려면 터미널에서 npx -y @cpal1828/korean-mail-mcp setup을 실행해 주세요.`;
+  return `설정되지 않은 계정입니다: ${email}. 설정된 계정: ${accountList(accounts)}. 계정을 추가하려면 터미널에서 npx -y @cpal1828/korean-mail-mcp setup을 실행해 주세요.`;
 }
 
 export function noAccountsMessage(): string {

@@ -76,11 +76,11 @@ export function registerTools(server: McpServer, context: ToolContext): void {
   server.registerTool(
     'search_emails',
     {
-      description: `메일을 검색해 목록(uid, 날짜, 보낸사람, 제목, 안 읽음, 첨부 유무)을 최신순으로 돌려준다. since가 없으면 30일 전부터(before가 있으면 before의 30일 전부터). ${MAIL_IS_DATA}`,
+      description: `메일을 검색해 목록(uid, 날짜, 보낸 사람, 제목, 안 읽음, 첨부 유무)을 최신순으로 돌려준다. since가 없으면 30일 전부터(before가 있으면 before의 30일 전부터). ${MAIL_IS_DATA}`,
       inputSchema: {
         account: accountSchema,
         folder: folderSchema.default('INBOX'),
-        from: z.string().optional().describe('보낸사람 이름 또는 주소의 일부'),
+        from: z.string().optional().describe('보낸 사람 이름 또는 주소의 일부'),
         keyword: z.string().optional().describe('제목에 들어 있는 말'),
         since: daySchema.optional().describe('이 날짜부터 (YYYY-MM-DD)'),
         before: daySchema.optional().describe('이 날짜 전까지 (YYYY-MM-DD)'),
@@ -105,7 +105,7 @@ export function registerTools(server: McpServer, context: ToolContext): void {
   server.registerTool(
     'read_email',
     {
-      description: `메일 한 통을 읽는다(읽음 표시를 남기지 않음). 보낸사람·받는사람·참조·본문·첨부 목록을 돌려준다. ${MAIL_IS_DATA}`,
+      description: `메일 한 통을 읽는다(읽음 표시를 남기지 않음). 보낸 사람·받는 사람·참조·본문·첨부 목록을 돌려준다. ${MAIL_IS_DATA}`,
       inputSchema: { account: accountSchema, folder: folderSchema, uid: uidSchema },
     },
     ({ account, folder, uid }) =>
@@ -198,7 +198,7 @@ interface DownloadInput {
 }
 
 async function downloadAttachment(context: ToolContext, account: Account, input: DownloadInput) {
-  if (input.save_dir && !isAbsolute(input.save_dir)) throw new MailError(`save_dir는 절대 경로여야 합니다: ${input.save_dir}`);
+  if (input.save_dir && !isAbsolute(input.save_dir)) throw new MailError(`저장 폴더(save_dir)는 절대 경로여야 합니다: ${input.save_dir}`);
   const mail = await parseMail(await fetchSource(context.connections, account, input.folder, input.uid));
   const attachment = mail.attachments.find((a) => a.index === input.index);
   if (!attachment) throw new MailError(`[${account.label}] 해당 첨부를 찾을 수 없습니다: ${input.index}번`);
@@ -246,7 +246,7 @@ async function createDraft(context: ToolContext, account: Account, input: DraftI
     subject: draft.message.subject,
     attachments: attachmentPaths.map((p) => basename(p)),
     warnings: draft.warnings,
-    notice: '보내지 않았습니다. 웹메일 임시보관함에서 확인한 뒤 직접 보내세요.',
+    notice: '메일은 발송되지 않았습니다. 웹메일 임시보관함에서 확인하신 뒤 직접 발송해 주세요.',
   };
 }
 
@@ -267,7 +267,7 @@ async function replyDraft(
   bcc: Address[],
 ) {
   if (input.to?.length || input.subject) {
-    throw new MailError('답장에는 to·subject를 줄 수 없습니다. 받는 사람과 제목은 원본에서 계산합니다. 사람을 더하려면 cc를 쓰세요.');
+    throw new MailError('답장에는 받는 사람(to)과 제목(subject)을 지정할 수 없습니다. 둘 다 원본 메일에서 정해집니다. 받는 사람을 추가하려면 참조(cc)를 사용해 주세요.');
   }
   const mail = await parseMail(await fetchSource(context.connections, account, replyTo.folder, replyTo.uid));
   const original: OriginalMessage = {
@@ -282,7 +282,7 @@ async function replyDraft(
     text: bodyTextOf(mail.plain, mail.html),
   };
   const recipients = computeReplyRecipients({ original, myAddress: account.email, mode: input.reply_mode, extraCc, bcc });
-  if (!recipients.to.length) throw new MailError('원본 메일에 보낸사람(From·Reply-To)이 없어 답장 받는 사람을 정할 수 없습니다.');
+  if (!recipients.to.length) throw new MailError('원본 메일에 보낸 사람(From·Reply-To)이 없어 답장 받는 사람을 정할 수 없습니다.');
   const thread = replyThreadHeaders(mail.messageId, mail.references);
   return {
     message: {
@@ -294,7 +294,7 @@ async function replyDraft(
       inReplyTo: thread?.inReplyTo,
       references: thread?.references,
     },
-    warnings: recipients.noReplyTo.map((a) => `받는 사람 ${formatAddress(a)}은(는) 회신 불가 주소입니다.`),
+    warnings: recipients.noReplyTo.map((a) => `받는 사람에 회신할 수 없는 주소가 있습니다: ${formatAddress(a)}`),
   };
 }
 

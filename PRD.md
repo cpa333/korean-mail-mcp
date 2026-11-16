@@ -50,6 +50,8 @@ npm은 아직 없는 패키지 이름에 Trusted Publisher를 등록할 수 없�
    1. `package.json`의 버전을 올려 커밋하고 같은 버전의 태그(`v0.1.1` 등)를 올린다.
    2. GitHub Actions가 타입 검사·테스트·빌드 후 provenance를 붙여 **승인 대기로 올린다**(`npm stage publish`, npm CLI 11.15.0 이상). 태그와 `package.json` 버전이 다르면 올리지 않는다. 배포 권한 토큰은 어디에도 저장하지 않는다(OIDC).
    3. **사용자가 승인한다:** npmjs.com → Account Settings → Staged Packages → Approve → 패스키 인증. 승인해야 공개된다.
+      - 올린 직후에는 npm 자동 검사("Validating") 동안 Approve 버튼이 비활성화된다. 몇 분 뒤 한 번 새로고침해서 승인한다. 승인 직후에는 두 버튼이 모두 흐려지고 곧 공개된다.
+      - 2026-11-16 `0.1.1`을 이 방식으로 처음 배포: GitHub Actions 전 단계 통과 → 승인 → `latest` = `0.1.1`, provenance(SLSA v1) 첨부 확인.
 5. 처음 배포한 뒤 npm 계정 설정에서 토큰 배포를 막아 두면(패키지 설정 → Publishing access → 2FA 필수·토큰 금지) Trusted Publisher 말고는 배포할 수 없다.
 
 ### 3-1. 설정 명령 (`setup`)

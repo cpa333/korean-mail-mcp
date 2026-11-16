@@ -18,9 +18,13 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      # Trusted Publishing은 npm CLI 11.5.1 이상이 필요하다.
+      # 승인 대기로 올리기(npm stage publish)는 npm CLI 11.15.0 이상이 필요하다.
       - run: npm install -g npm@latest
       - name: 태그와 package.json 버전이 같은지 확인
         run: node -e "const v = 'v' + require('./package.json').version; if (v !== process.env.GITHUB_REF_NAME) { console.error(v + ' != ' + process.env.GITHUB_REF_NAME); process.exit(1); }"
       - run: npm ci
-      - run: npm publish --provenance --access public
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # Trusted Publisher 권한이 'npm stage publish'뿐이라 공개는 사람이 npmjs.com에서 승인해야 한다 (PRD §3-0).
+      - run: npm stage publish --provenance

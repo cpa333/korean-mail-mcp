@@ -29,6 +29,10 @@ describe('bodyTextOf', () => {
     expect(bodyTextOf(undefined, `<p>${line}</p>`)).toBe(line);
   });
 
+  it('줄바꿈을 \\n 하나로 통일한다', () => {
+    expect(bodyTextOf('첫 줄\r\n둘째 줄\r셋째 줄\n넷째 줄', undefined)).toBe('첫 줄\n둘째 줄\n셋째 줄\n넷째 줄');
+  });
+
   it('본문이 없으면 빈 문자열', () => {
     expect(bodyTextOf(undefined, undefined)).toBe('');
   });

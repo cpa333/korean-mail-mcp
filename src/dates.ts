@@ -20,6 +20,12 @@ export function toLocalIso(date: Date): string {
   return `${local.toISOString().slice(0, 19)}${sign}${hours}:${minutes}`;
 }
 
+/** 답장 인용에 쓰는 사람이 읽기 쉬운 형식(예: 2026-10-23 18:14 (UTC+09:00)). */
+export function toLocalDisplay(date: Date): string {
+  const iso = toLocalIso(date);
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} (UTC${iso.slice(19)})`;
+}
+
 /** YYYY-MM-DD가 실제로 있는 날짜면 그날 0시(사용자 PC 시간대)를 돌려준다. */
 export function parseDay(text: string): Date | undefined {
   const [year, month, day] = text.split('-').map(Number);

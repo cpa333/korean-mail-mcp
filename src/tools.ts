@@ -4,7 +4,7 @@ import { basename, isAbsolute, join } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { accountList, noAccountsMessage, sameEmail, serviceOf, unknownAccountMessage, type Account } from './accounts.js';
-import { parseDay, toLocalIso } from './dates.js';
+import { parseDay, toLocalDisplay, toLocalIso } from './dates.js';
 import { buildDraft } from './drafts.js';
 import { ImapConnections, MailError } from './imap.js';
 import { appendDraft, fetchSource, listFolders, searchMessages } from './mailbox.js';
@@ -275,7 +275,7 @@ async function replyDraft(
     replyTo: mail.replyTo,
     to: mail.to,
     cc: mail.cc,
-    date: mail.date ?? '',
+    date: mail.dateValue ? toLocalDisplay(mail.dateValue) : (mail.date ?? '날짜 모름'),
     subject: mail.subject,
     messageId: mail.messageId,
     references: mail.references,

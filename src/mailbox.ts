@@ -79,10 +79,13 @@ export async function searchMessages(
 
     const messages: MessageSummary[] = [];
     let start = 0;
+    let droppedMatches = false;
     while (start < scanned.length && messages.length < criteria.limit) {
       const batch = scanned.slice(start, start + FETCH_BATCH_SIZE);
       const matched = await fetchMatches(client, batch, criteria, range);
-      messages.push(...matched.slice(0, criteria.limit - messages.length));
+      const room = criteria.limit - messages.length;
+      droppedMatches = matched.length > room;
+      messages.push(...matched.slice(0, room));
       start += FETCH_BATCH_SIZE;
     }
 
@@ -90,7 +93,7 @@ export async function searchMessages(
     return {
       messages,
       scanLimited: found.length > MAX_SCANNED_MESSAGES,
-      moreAvailable: messages.length >= criteria.limit && start < scanned.length,
+      moreAvailable: droppedMatches || (messages.length >= criteria.limit && start < scanned.length),
     };
   });
 }

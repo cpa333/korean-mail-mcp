@@ -36,7 +36,8 @@ const SERVICES: Record<AccountId, Service> = {
     loginName: (email) => email,
     setupSteps: [
       "1. IMAP 켜기: 다음 메일 → 환경설정 → IMAP/POP3 → IMAP/SMTP 사용 → '사용함' → 저장",
-      '2. 앱 비밀번호 만들기: 다음 회원 → 마이페이지에서 앱 비밀번호 생성',
+      '2. 앱 비밀번호 만들기: 다음 회원 → 마이페이지 → 계정 보안 → 앱 비밀번호',
+      '   → 휴대폰 2차 인증 → 이름 입력(예: mailmcp) → 생성. 비밀번호는 한 번만 보이니 바로 복사하세요.',
       '   (2025-12-01부터 다음 메일 앱 비밀번호는 여기서만 만듭니다. 카카오계정에서 만든 것은 안 됩니다)',
     ],
     guideUrl: 'https://cs.daum.net/faq/43/9234.html?faqId=31143',

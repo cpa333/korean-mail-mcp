@@ -24,11 +24,13 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@types/html-to-text": "9.0.4",
     "@types/mailparser": "^3.9.0",
     "@types/node": "^22.20.5",
     "@types/nodemailer": "^8.0.2",
     "@zone-eu/mailsplit": "5.4.31",
     "esbuild": "^0.28.2",
+    "html-to-text": "10.0.1",
     "imapflow": "^2.12.1",
     "mailparser": "^3.14.4",
     "nodemailer": "^10.6.0",

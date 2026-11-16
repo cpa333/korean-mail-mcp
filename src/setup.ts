@@ -21,7 +21,7 @@ const SHELL_SAFE_VALUE = /^[A-Za-z0-9@._+-]+$/;
 
 export type Env = Record<string, string>;
 type Scope = 'user' | 'local';
-type Action = 'add' | 'password' | 'remove' | 'done';
+type Action = 'add' | 'password' | 'remove' | 'save' | 'cancel';
 
 interface Existing {
   scope: Scope;
@@ -38,7 +38,7 @@ interface Credentials {
   password: string;
 }
 
-/** PRD §3-1. 계정을 더하거나 바꾸거나 빼고, 접속을 확인하고, Claude Code에 등록한다. */
+/** PRD §3-1. 계정을 추가·변경·삭제하고, 접속을 확인하고, Claude Code에 등록한다. */
 export async function runSetup(): Promise<void> {
   console.log('\nkorean-mail-mcp 설정\n');
   const cli = findClaudeCli();
@@ -50,7 +50,14 @@ export async function runSetup(): Promise<void> {
     const accounts = loadAccounts(env).accounts;
     printAccounts(accounts);
     const action = await chooseAction(accounts);
-    if (action === 'done') break;
+    if (action === 'save') break;
+    if (action === 'cancel') {
+      if (!changed || (await confirm({ message: '바뀐 내용을 저장하지 않고 끝낼까요?', default: false }))) {
+        console.log('\n저장하지 않고 끝냅니다. 등록은 그대로입니다.');
+        return;
+      }
+      continue;
+    }
     const next = await applyAction(action, env, accounts);
     if (next) {
       env = next;
@@ -75,13 +82,13 @@ function printAccounts(accounts: Account[]): void {
 async function chooseAction(accounts: Account[]): Promise<Action> {
   const choices: { name: string; value: Action }[] = [{ name: '계정 추가', value: 'add' }];
   if (accounts.length) {
-    choices.push({ name: '비밀번호 바꾸기', value: 'password' }, { name: '계정 빼기', value: 'remove' });
+    choices.push({ name: '비밀번호 바꾸기', value: 'password' }, { name: '계정 삭제', value: 'remove' });
   }
-  choices.push({ name: '끝내기 (바뀐 내용 등록)', value: 'done' });
+  choices.push({ name: '완료 (저장)', value: 'save' }, { name: '취소 (저장 안 함)', value: 'cancel' });
   return select({ message: '무엇을 할까요?', choices });
 }
 
-async function applyAction(action: Exclude<Action, 'done'>, env: Env, accounts: Account[]): Promise<Env | undefined> {
+async function applyAction(action: 'add' | 'password' | 'remove', env: Env, accounts: Account[]): Promise<Env | undefined> {
   if (action === 'add') {
     const service = await select<ServiceId>({
       message: '어떤 메일인가요?',
@@ -93,12 +100,14 @@ async function applyAction(action: Exclude<Action, 'done'>, env: Env, accounts: 
     return withAccount(env, accounts, service, credentials);
   }
 
-  const account = await chooseAccount(accounts, action === 'password' ? '비밀번호를 바꿀 계정' : '뺄 계정');
+  const account = await chooseAccount(accounts, action === 'password' ? '비밀번호를 바꿀 계정' : '삭제할 계정');
   if (action === 'password') {
     const credentials = await askCredentials(account.service, account.email);
     return credentials ? withAccount(env, accounts, account.service, credentials) : undefined;
   }
-  if (!(await confirm({ message: `${account.label} 계정을 뺄까요?`, default: false }))) return undefined;
+  const serviceLabel = serviceOf(account.service).label;
+  const message = `${account.email}을(를) 이 MCP에서 삭제할까요? (${serviceLabel} 계정과 메일은 그대로입니다)`;
+  if (!(await confirm({ message, default: false }))) return undefined;
   return withoutAccount(env, account);
 }
 
@@ -207,7 +216,7 @@ export function parseEnvironment(output: string): Env | undefined {
 function register(cli: ClaudeCli | undefined, existing: Existing | undefined, env: Env): void {
   if (!loadAccounts(env).accounts.length) {
     if (cli && existing) runClaude(cli, ['mcp', 'remove', SERVER_NAME, '-s', existing.scope]);
-    console.log(`\n계정을 모두 빼서 ${SERVER_NAME} 등록을 지웠습니다. Claude Code를 다시 시작하면 반영됩니다.`);
+    console.log(`\n계정을 모두 삭제해서 ${SERVER_NAME} 등록을 지웠습니다. Claude Code를 다시 시작하면 반영됩니다.`);
     return;
   }
   const server = serverCommand();

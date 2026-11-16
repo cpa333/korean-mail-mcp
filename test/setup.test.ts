@@ -3,6 +3,7 @@ import { loadAccounts } from '../src/accounts.js';
 import packageJson from '../package.json' with { type: 'json' };
 import {
   EscPressed,
+  announceServerChange,
   ask,
   emailProblem,
   failureReason,
@@ -10,6 +11,7 @@ import {
   manualCommand,
   parseEnvironment,
   parseExisting,
+  parseServerCommand,
   passwordProblem,
   pickClaudeCli,
   serverCommandFor,
@@ -89,10 +91,11 @@ describe('parseEnvironment', () => {
 });
 
 describe('parseExisting (기존 등록 읽기 안전장치)', () => {
-  it('범위와 계정 값을 읽는다', () => {
+  it('범위와 계정 값, 실행 명령을 읽는다', () => {
     expect(parseExisting(OUTPUT)).toEqual({
       scope: 'user',
       env: { NAVER_EMAIL: 'me@naver.com', NAVER_APP_PASSWORD: 'ABCD1234EFGH' },
+      server: 'node C:\\x\\index.cjs',
     });
   });
 
@@ -277,5 +280,38 @@ describe('withAccount·withoutAccount', () => {
 
   it('계정을 빼면 그 계정의 두 키만 지운다', () => {
     expect(withoutAccount(env, accounts[0])).toEqual({ DAUM_EMAIL: 'me@hanmail.net', DAUM_APP_PASSWORD: 'd' });
+  });
+});
+
+describe('실행 명령 비교 (업데이트, PRD §3-1)', () => {
+  it('Command와 Args 줄을 등록할 때와 같은 모양으로 읽는다', () => {
+    const output = '  Type: stdio\n  Command: cmd\n  Args: /c npx -y @cpal1828/korean-mail-mcp@0.1.2\n  Environment:\n';
+    expect(parseServerCommand(output)).toBe('cmd /c npx -y @cpal1828/korean-mail-mcp@0.1.2');
+  });
+
+  it('Args 줄이 없으면 Command만, Command 줄이 없으면 읽지 못한 것으로 본다', () => {
+    expect(parseServerCommand('  Command: korean-mail-mcp\n')).toBe('korean-mail-mcp');
+    expect(parseServerCommand('  Type: stdio\n')).toBeUndefined();
+  });
+
+  it('실행 버전이 다르면 바뀐 내용으로 보고 알린다', () => {
+    const logs: string[] = [];
+    const original = console.log;
+    console.log = (line: string) => logs.push(line);
+    try {
+      const changed = announceServerChange(
+        'cmd /c npx -y @cpal1828/korean-mail-mcp@0.1.2',
+        'cmd /c npx -y @cpal1828/korean-mail-mcp@0.1.3',
+      );
+      expect(changed).toBe(true);
+      expect(logs.join('\n')).toContain('실행 명령이 바뀝니다: cmd /c npx -y @cpal1828/korean-mail-mcp@0.1.2 → cmd /c npx -y @cpal1828/korean-mail-mcp@0.1.3');
+    } finally {
+      console.log = original;
+    }
+  });
+
+  it('같거나 기존 명령을 읽지 못했으면 바뀐 내용이 아니다', () => {
+    expect(announceServerChange('node C:\\x\\index.cjs', 'node C:\\x\\index.cjs')).toBe(false);
+    expect(announceServerChange(undefined, 'npx -y @cpal1828/korean-mail-mcp@0.1.3')).toBe(false);
   });
 });

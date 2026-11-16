@@ -48,6 +48,8 @@ type Action = 'add' | 'password' | 'remove' | 'save' | 'cancel';
 interface Existing {
   scope: Scope;
   env: Env;
+  /** 등록된 서버 실행 명령(`Command` + `Args`). 읽지 못하면 없다. */
+  server?: string;
 }
 
 export interface ClaudeCli {
@@ -94,7 +96,8 @@ export async function runSetup(): Promise<void> {
   }
   const existing = lookup.cli ? readExisting(lookup.cli) : undefined;
   let env: Env = { ...existing?.env };
-  let changed = false;
+  // 버전을 고정해 등록하므로, 실행 명령만 바뀌어도 다시 등록해야 업데이트된다 (PRD §3-1).
+  let changed = announceServerChange(existing?.server, serverCommand().join(' '));
 
   for (;;) {
     const accounts = loadAccounts(env).accounts;
@@ -120,6 +123,14 @@ export async function runSetup(): Promise<void> {
     return;
   }
   register(lookup, existing, env);
+}
+
+/** 기존 실행 명령과 새로 등록할 명령이 다르면 알리고 true. 기존 명령을 읽지 못했으면 비교하지 않는다. */
+export function announceServerChange(registered: string | undefined, next: string): boolean {
+  if (!registered || registered === next) return false;
+  console.log(`\n실행 명령이 바뀝니다: ${registered} → ${next}`);
+  console.log('완료 (저장)을 선택하면 계정은 그대로 두고 새 실행 명령으로 다시 등록합니다.');
+  return true;
 }
 
 /** Esc로 멈춘 질문은 정해 둔 값으로 바꾸고, 그 밖의 오류는 그대로 던진다. */
@@ -329,7 +340,15 @@ export function parseExisting(output: string): Existing {
   if (!env || !loadAccounts(env).accounts.length) {
     throw new Error('기존 등록의 계정 정보를 읽지 못했습니다. 기존 등록을 지우지 않고 중단합니다.');
   }
-  return { scope, env };
+  return { scope, env, server: parseServerCommand(output) };
+}
+
+/** `Command:`·`Args:` 줄을 등록할 때와 같은 모양(공백으로 이은 문자열)으로 읽는다. */
+export function parseServerCommand(output: string): string | undefined {
+  const command = output.match(/^\s+Command:[ \t]*(.*)$/m)?.[1]?.trim();
+  if (!command) return undefined;
+  const args = output.match(/^\s+Args:[ \t]*(.*)$/m)?.[1]?.trim();
+  return args ? `${command} ${args}` : command;
 }
 
 /**

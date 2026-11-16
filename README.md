@@ -33,7 +33,7 @@ npx -y @cpal1828/korean-mail-mcp setup
 
 setup은 지금 실행한 버전으로 고정해 Claude Code에 등록합니다. 새 버전이 배포되어도 자동으로 바뀌지 않으므로, 혹시 문제가 있는 버전이 배포되더라도 setup을 다시 실행하기 전까지는 영향을 받지 않습니다.
 
-업데이트하려면 아래 명령으로 최신판 setup을 실행하고 **완료 (저장)**를 선택해 주세요. 등록된 계정은 그대로 유지됩니다.
+업데이트하려면 아래 명령으로 최신판 setup을 실행하고 **완료 (저장)**를 선택해 주세요. 화면에 "실행 명령이 바뀝니다"가 나오면 새 버전으로 다시 등록됩니다. 등록된 계정은 그대로 유지되고, 앱 비밀번호를 다시 입력할 필요가 없습니다. (0.1.2 이하에서 실행한 setup으로는 계정을 바꾸지 않으면 업데이트되지 않았습니다.)
 
 ```
 npx -y @cpal1828/korean-mail-mcp@latest setup
@@ -125,10 +125,10 @@ setup을 쓸 수 없는 경우 아래처럼 직접 등록할 수 있습니다. �
 
 ```
 # macOS·Linux
-claude mcp add --scope user korean-mail -e NAVER_EMAIL=me@naver.com -e NAVER_APP_PASSWORD=앱비밀번호 -- npx -y @cpal1828/korean-mail-mcp@0.1.2
+claude mcp add --scope user korean-mail -e NAVER_EMAIL=me@naver.com -e NAVER_APP_PASSWORD=앱비밀번호 -- npx -y @cpal1828/korean-mail-mcp@0.1.3
 
 # Windows
-claude mcp add --scope user korean-mail -e NAVER_EMAIL=me@naver.com -e NAVER_APP_PASSWORD=앱비밀번호 -- cmd /c npx -y @cpal1828/korean-mail-mcp@0.1.2
+claude mcp add --scope user korean-mail -e NAVER_EMAIL=me@naver.com -e NAVER_APP_PASSWORD=앱비밀번호 -- cmd /c npx -y @cpal1828/korean-mail-mcp@0.1.3
 ```
 
 - **직접 입력하면 앱 비밀번호가 터미널 명령 기록에 남습니다.** 가능하면 setup을 사용해 주세요.

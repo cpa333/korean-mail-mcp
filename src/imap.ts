@@ -141,19 +141,42 @@ export class ImapConnections {
   }
 
   private async connect(account: Account): Promise<ImapFlow> {
-    const client = new ImapFlow({
-      host: account.host,
-      port: IMAP_PORT,
-      secure: true,
-      auth: { user: account.loginName, pass: account.password },
-      logger: false,
-      connectionTimeout: CONNECT_TIMEOUT_MS,
-    });
-    // 'error' 이벤트에 듣는 쪽이 없으면 Node 프로세스가 죽는다. 원인은 다음 호출에서 오류로 드러난다.
-    client.on('error', (error: ImapErrorFields) => {
-      console.error(`[${account.id}] IMAP 연결 오류: ${error.code ?? 'unknown'}`);
-    });
+    const client = newClient(account);
     await client.connect();
     return client;
+  }
+}
+
+function newClient(account: Account): ImapFlow {
+  const client = new ImapFlow({
+    host: account.host,
+    port: IMAP_PORT,
+    secure: true,
+    auth: { user: account.loginName, pass: account.password },
+    logger: false,
+    connectionTimeout: CONNECT_TIMEOUT_MS,
+  });
+  // 'error' 이벤트에 듣는 쪽이 없으면 Node 프로세스가 죽는다. 원인은 다음 호출에서 오류로 드러난다.
+  client.on('error', (error: ImapErrorFields) => {
+    console.error(`[${account.id}] IMAP 연결 오류: ${error.code ?? 'unknown'}`);
+  });
+  return client;
+}
+
+/**
+ * setup의 접속 확인. 로그인하고 받은편지함을 읽기 전용으로 열어 메일 수를 돌려준다.
+ * 거절돼도 잠그지 않는다(사용자가 비밀번호를 고쳐 다시 넣을 수 있어야 하므로, PRD §3-1).
+ */
+export async function checkLogin(account: Account): Promise<number> {
+  const client = newClient(account);
+  try {
+    await client.connect();
+    const mailbox = await client.mailboxOpen('INBOX', { readOnly: true });
+    return mailbox.exists;
+  } catch (error) {
+    throw toMailError(account, error);
+  } finally {
+    // 확인이 끝난 뒤의 로그아웃 실패는 결과와 무관하다(연결 실패 후에는 로그아웃할 연결도 없다).
+    await client.logout().catch(() => undefined);
   }
 }

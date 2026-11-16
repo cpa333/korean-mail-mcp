@@ -41,7 +41,9 @@ AI 에이전트가 네이버·다음 메일을 읽고, 답장·새 메일 초안
 
 ### 3-0. 배포 절차
 npm은 아직 없는 패키지 이름에 Trusted Publisher를 등록할 수 없으므로(2026-11-16 확인), 첫 배포만 사람이 직접 한다.
-1. **첫 배포(사용자, 1회):** 프로젝트 폴더에서 `npm login`(npm 계정 패스키 인증) → `npm publish --access public`. `prepublishOnly`가 타입 검사·테스트·빌드를 먼저 돌려 실패하면 배포하지 않는다.
+1. **첫 배포(사용자, 1회):** 프로젝트 폴더에서 `npm login`(npm 계정 패스키 인증) → `npm publish` → `npm logout`. `prepublishOnly`가 타입 검사·테스트·빌드를 먼저 돌려 실패하면 배포하지 않는다.
+   - 2026-11-16 `0.1.0` 첫 배포 완료. 새 패키지는 npm이 몇 분 동안 처리하며, 그동안 패키지 페이지에 `0.0.0-stage` 임시 버전("Temporary Holding Version")이 보이고 registry 조회는 404가 난다. 사람이 승인할 단계는 아니었다(Staged Packages 목록은 비어 있었음). 처리가 끝나면 `latest`가 새 버전을 가리키고 npm이 배포 완료 메일을 보낸다.
+   - 반드시 프로젝트 폴더에서 실행한다. 다른 폴더에서 실행하면 `package.json`을 찾지 못해 실패한다(배포되지는 않음).
 2. **Trusted Publisher 등록(사용자, 1회):** npmjs.com → 패키지 설정 → Trusted Publisher → GitHub Actions, 저장소 `cpa333/korean-mail-mcp`, 워크플로 `publish.yml`. 등록 뒤 2일 안에 이 방식으로 첫 배포를 해야 하고, 넘기면 지우고 다시 등록한다.
 3. **저장소 공개:** provenance(출처 증명)는 공개 저장소에서만 붙으므로 2번 다음 배포 전에 공개로 바꾼다.
 4. **이후 배포:** `package.json`의 버전을 올려 커밋하고 같은 버전의 태그(`v0.1.1` 등)를 올리면 GitHub Actions가 타입 검사·테스트·빌드 후 provenance를 붙여 배포한다. 태그와 `package.json` 버전이 다르면 배포하지 않는다. 배포 권한 토큰은 어디에도 저장하지 않는다(npm CLI 11.5.1 이상의 OIDC 사용).

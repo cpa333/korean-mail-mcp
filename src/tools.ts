@@ -49,7 +49,10 @@ const daySchema = z
 
 export function registerTools(server: McpServer, context: ToolContext): void {
   const configured = context.accounts.length ? `설정된 계정: ${accountList(context.accounts)}` : '설정된 계정이 없다';
-  const accountSchema = z.string().min(1).describe(`메일 계정의 메일 주소. ${configured}`);
+  const accountSchema = z
+    .string()
+    .min(1)
+    .describe(`메일 계정의 메일 주소. ${configured}. 어느 계정인지 요청에서 분명하지 않으면 도구를 부르기 전에 사용자에게 묻는다.`);
 
   server.registerTool(
     'list_accounts',

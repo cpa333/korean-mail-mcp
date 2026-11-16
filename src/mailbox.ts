@@ -8,6 +8,11 @@ const DEFAULT_SEARCH_DAYS = 30;
 const MAX_SCANNED_MESSAGES = 2_000;
 const FETCH_BATCH_SIZE = 500;
 const FORWARDED_TYPE = 'message/rfc822';
+export const BYTES_PER_MB = 1024 * 1024;
+const MAX_MESSAGE_BYTES = 50 * BYTES_PER_MB;
+const MEGABYTE_DECIMALS = 1;
+// 결과 상한 (PRD §6-4). 보낸 쪽이 머리말을 부풀려 결과를 넘치게 하지 못하게 한다. read_email도 같은 값을 쓴다.
+export const MAX_HEADER_TEXT_CHARS = 1_000;
 
 export interface FolderInfo {
   path: string;
@@ -103,10 +108,19 @@ async function fetchMatches(client: ImapFlow, uids: number[], criteria: SearchCr
   const query = { uid: true, envelope: true, flags: true, bodyStructure: true };
   for await (const msg of client.fetch(uids.join(','), query, { uid: true })) {
     const summary = toSummary(msg);
-    if (matches(summary, criteria, range)) matched.push(summary);
+    if (matches(summary, criteria, range)) matched.push(limitHeaderText(summary));
   }
   // limit에서 자를 때 최신 메일이 남게 한다.
   return matched.sort((a, b) => b.uid - a.uid);
+}
+
+/** 거르기는 원문 전체로 하고, 돌려줄 때만 자른다. */
+function limitHeaderText(summary: MessageSummary): MessageSummary {
+  return {
+    ...summary,
+    from: { ...summary.from, name: summary.from.name?.slice(0, MAX_HEADER_TEXT_CHARS) },
+    subject: summary.subject.slice(0, MAX_HEADER_TEXT_CHARS),
+  };
 }
 
 function toSummary(msg: FetchMessageObject): MessageSummary {
@@ -159,17 +173,30 @@ export async function fetchSource(
   folder: string,
   uid: number,
 ): Promise<Buffer> {
+  const notFound = () => new MailError(`[${account.label}] 해당 메일을 찾을 수 없습니다: ${folder} / uid ${uid}`);
   return connections.withMailbox(account, folder, { readOnly: true }, async (client) => {
+    // 원문을 받기 전에 크기를 물어, 아주 큰 메일을 메모리에 올리지 않는다 (PRD §6-4).
+    const info = await client.fetchOne(String(uid), { uid: true, size: true }, { uid: true });
+    if (!info) throw notFound();
+    if (info.size !== undefined && info.size > MAX_MESSAGE_BYTES) {
+      throw new MailError(`[${account.label}] 메일이 너무 큽니다: ${megabytes(info.size)}MB. 웹메일에서 직접 확인해 주세요.`);
+    }
     const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
-    if (!msg || !msg.source) throw new MailError(`[${account.label}] 해당 메일을 찾을 수 없습니다: ${folder} / uid ${uid}`);
+    if (!msg || !msg.source) throw notFound();
     return msg.source;
   });
+}
+
+/** 한도를 조금 넘은 크기가 한도와 같은 값으로 보이지 않게 올림한다. */
+export function megabytes(bytes: number): string {
+  const scale = 10 ** MEGABYTE_DECIMALS;
+  return (Math.ceil((bytes / BYTES_PER_MB) * scale) / scale).toFixed(MEGABYTE_DECIMALS);
 }
 
 export async function appendDraft(connections: ImapConnections, account: Account, raw: Buffer): Promise<string> {
   return connections.withClient(account, async (client) => {
     const path = findDraftsPath(await client.list());
-    if (!path) throw new MailError(`[${account.label}] 임시보관함을 찾을 수 없습니다. list_folders로 메일함 이름을 확인해 주세요.`);
+    if (!path) throw new MailError(`[${account.label}] 임시보관함을 찾을 수 없습니다. 메일함 목록 도구(list_folders)로 메일함 이름을 확인해 주세요.`);
     await client.append(path, raw, DRAFT_FLAGS);
     return path;
   });

@@ -37,6 +37,12 @@ describe('sanitizeFileName', () => {
     expect(result.length).toBe('견적서.pdf'.length);
   });
 
+  it('점으로 시작하는 이름은 앞에 _를 붙여 설정 파일로 저장되지 않게 한다', () => {
+    expect(sanitizeFileName('.gitconfig', 1, 'text/plain')).toBe('_.gitconfig');
+    expect(sanitizeFileName('..\\.bashrc', 1, 'text/plain')).toBe('_.bashrc');
+    expect(sanitizeFileName('보고서.pdf', 1, 'application/pdf')).toBe('보고서.pdf');
+  });
+
   it('비면 첨부N에 형식의 확장자를 붙인다', () => {
     expect(sanitizeFileName(undefined, 3, 'image/png')).toBe('첨부3.png');
     expect(sanitizeFileName('...', 2, 'text/calendar')).toBe('첨부2.ics');
@@ -53,6 +59,23 @@ describe('sanitizeFileName', () => {
     expect(sanitizeFileName(`${'a'.repeat(94)}. ${'b'.repeat(10)}.pdf`, 1, '')).toBe(`${'a'.repeat(94)}.pdf`);
     const emoji = sanitizeFileName(`${'a'.repeat(95)}😀😀.pdf`, 1, '');
     expect(emoji).toBe(`${'a'.repeat(95)}.pdf`);
+  });
+
+  it('연속 공백을 하나로 줄여 확장자를 밀어내지 못하게 한다', () => {
+    expect(sanitizeFileName('견적서.pdf        .exe', 1, '')).toBe('견적서.pdf .exe');
+    expect(sanitizeFileName('a  　 b.txt', 1, '')).toBe('a b.txt');
+  });
+
+  it('점·공백이 수만 개인 이름도 빨리 끝난다', () => {
+    const started = Date.now();
+    expect(sanitizeFileName(`${'.'.repeat(100_000)}a`, 1, '')).toBe('첨부1');
+    expect(sanitizeFileName(`a${'. '.repeat(100_000)}`, 1, '')).toBe('a');
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('정리하기 전에 1,000자로 먼저 자른다', () => {
+    const result = sanitizeFileName(`${'가'.repeat(1_200)}.exe`, 1, '');
+    expect(result).toBe('가'.repeat(100));
   });
 
   it('너무 긴 확장자는 확장자로 보지 않고 그냥 자른다', () => {

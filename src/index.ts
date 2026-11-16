@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import packageJson from '../package.json' with { type: 'json' };
+// 버전만 가져와 package.json 전체가 번들에 들어가지 않게 한다.
+import { version } from '../package.json';
 import { loadAccounts, noAccountsMessage } from './accounts.js';
 import { ImapConnections } from './imap.js';
 import { runSetup } from './setup.js';
@@ -20,7 +21,7 @@ async function startServer(): Promise<void> {
   for (const warning of warnings) console.error(warning);
   if (accounts.length === 0) console.error(noAccountsMessage());
 
-  const server = new McpServer({ name: 'korean-mail-mcp', version: packageJson.version });
+  const server = new McpServer({ name: 'korean-mail-mcp', version });
   registerTools(server, { accounts, connections: new ImapConnections(), environmentError: nodeVersionError() });
   await server.connect(new StdioServerTransport());
 }
@@ -36,7 +37,7 @@ async function setup(): Promise<void> {
   } catch (error) {
     // Ctrl+C로 질문을 빠져나가면 inquirer가 ExitPromptError를 던진다.
     if (error instanceof Error && error.name === 'ExitPromptError') process.exit(1);
-    console.error(`\n설정을 완료하지 못했습니다:${error instanceof Error ? error.message : String(error)}`);
+    console.error(`\n설정을 완료하지 못했습니다: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
   // 브라우저를 여는 하위 프로세스 등이 남아 있어도 설정은 끝났으므로 바로 나간다.

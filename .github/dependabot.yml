@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # publish.yml의 액션 SHA 고정을 갱신한다 (PRD §3-0).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly

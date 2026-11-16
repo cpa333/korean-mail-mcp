@@ -1,6 +1,9 @@
 import { join } from 'node:path';
 
 const MAX_NAME_LENGTH = 100;
+const MAX_RAW_NAME_LENGTH = 1_000;
+// 일반 공백·NBSP·전각 공백 등이 둘 이상 이어진 것
+const CONSECUTIVE_SPACES = /\s{2,}/g;
 // 이보다 긴 "확장자"는 이름의 일부로 본다. 살리면 자를 때 이름이 거의 남지 않는다.
 const MAX_EXTENSION_LENGTH = 20;
 const FALLBACK_STEM = '첨부';
@@ -57,20 +60,27 @@ const EXTENSION_BY_TYPE: Record<string, string> = {
  */
 export function sanitizeFileName(name: string | undefined, index: number, contentType: string): string {
   // 보낸 쪽이 `..\..\windows\evil.exe`처럼 경로를 적어 보낼 수 있다
-  let result = (name ?? '').replaceAll('/', '\\');
+  // 아래 정리 단계가 이름 길이에 비례해 오래 걸리지 않게 먼저 자른다
+  let result = sliceWhole(name ?? '', MAX_RAW_NAME_LENGTH).replaceAll('/', '\\');
   result = result.slice(result.lastIndexOf('\\') + 1);
 
   result = result.replace(FORBIDDEN_CHARACTERS, '_').replace(INVISIBLE_CHARACTERS, '');
   // 맥에서 온 한글은 자모가 갈라져(NFD) 있다
   result = result.normalize('NFC');
+  // `견적서.pdf        .exe`처럼 공백을 늘어놓아 진짜 확장자를 화면 밖으로 밀어내지 못하게 한다
+  result = result.replace(CONSECUTIVE_SPACES, ' ');
   // Windows는 끝의 점·공백을 조용히 떼어 내 저장한 이름과 알린 이름이 달라진다
-  result = result.trim().replace(/[. ]+$/, '');
+  result = trimTrailingDotsAndSpaces(result.trim());
 
   if (result.length === 0) {
     return `${FALLBACK_STEM}${index}${EXTENSION_BY_TYPE[contentType.toLowerCase()] ?? ''}`;
   }
 
   if (isReserved(result)) {
+    result = `_${result}`;
+  }
+  // `.gitconfig`·`.bashrc`처럼 프로그램이 읽는 설정 파일로 저장되지 않게 한다 (PRD §8-1)
+  if (result.startsWith('.')) {
     result = `_${result}`;
   }
 
@@ -107,13 +117,22 @@ function shorten(name: string): string {
   const split = splitExtension(name);
   const extension = split.extension.length > MAX_EXTENSION_LENGTH ? '' : split.extension;
 
-  let keep = MAX_NAME_LENGTH - extension.length;
-  // 이모지 같은 두 칸짜리 글자를 반으로 가르지 않는다
-  if (/[\uD800-\uDBFF]/.test(name.charAt(keep - 1))) {
-    keep--;
-  }
+  return trimTrailingDotsAndSpaces(sliceWhole(name, MAX_NAME_LENGTH - extension.length)) + extension;
+}
 
-  return name.slice(0, keep).replace(/[. ]+$/, '') + extension;
+/** 앞에서 `length`자까지 남긴다. 이모지 같은 두 칸짜리 글자를 반으로 가르지 않는다. */
+function sliceWhole(text: string, length: number): string {
+  const keep = /[\uD800-\uDBFF]/.test(text.charAt(length - 1)) ? length - 1 : length;
+  return text.slice(0, keep);
+}
+
+// 정규식 `/[. ]+$/`는 점이 수만 개인 이름에서 제곱 시간이 걸린다(2026-11-16 재현).
+function trimTrailingDotsAndSpaces(text: string): string {
+  let end = text.length;
+  while (end > 0 && (text[end - 1] === '.' || text[end - 1] === ' ')) {
+    end--;
+  }
+  return text.slice(0, end);
 }
 
 /** `.bashrc`처럼 점으로 시작하는 이름은 확장자 없이 이름 전체를 이름으로 본다. */

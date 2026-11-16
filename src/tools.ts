@@ -7,7 +7,15 @@ import { accountList, noAccountsMessage, sameEmail, serviceOf, unknownAccountMes
 import { parseDay, toLocalDisplay, toLocalIso } from './dates.js';
 import { buildDraft } from './drafts.js';
 import { ImapConnections, MailError } from './imap.js';
-import { appendDraft, fetchSource, listFolders, searchMessages } from './mailbox.js';
+import {
+  BYTES_PER_MB,
+  MAX_HEADER_TEXT_CHARS,
+  appendDraft,
+  fetchSource,
+  listFolders,
+  megabytes,
+  searchMessages,
+} from './mailbox.js';
 import { bodyTextOf } from './mail/body-text.js';
 import { parseMail, type ParsedMessage } from './mail/parse.js';
 import {
@@ -23,10 +31,18 @@ import {
   type ReplyMode,
 } from './mail/reply.js';
 import { uniqueSavePath } from './files/names.js';
+import { checkPath, isExecutableName, markAsDownloaded } from './files/paths.js';
 
 const DEFAULT_SEARCH_LIMIT = 20;
 const MAX_SEARCH_LIMIT = 100;
 const MAX_BODY_CHARS = 50_000;
+const BODY_TRUNCATED_NOTICE = '본문이 길어 앞부분만 표시합니다.';
+// 결과 상한 (PRD §6-4). 보낸 쪽이 머리말을 부풀려 결과를 넘치게 하지 못하게 한다.
+const MAX_LISTED_ADDRESSES = 100;
+const MAX_LISTED_ATTACHMENTS = 100;
+// 네이버·다음 일반 첨부 한도에 맞춘 보수적 값 (PRD §6-6)
+const MAX_DRAFT_ATTACHMENTS_MB = 20;
+const MAX_DRAFT_ATTACHMENT_BYTES = MAX_DRAFT_ATTACHMENTS_MB * BYTES_PER_MB;
 const JSON_INDENT = 2;
 
 const MAIL_IS_DATA =
@@ -142,7 +158,12 @@ export function registerTools(server: McpServer, context: ToolContext): void {
         subject: z.string().optional().describe('새 메일의 제목'),
         cc: z.array(z.string()).optional().describe('참조. 답장이면 계산된 참조 뒤에 더한다'),
         bcc: z.array(z.string()).optional().describe('숨은참조'),
-        attachments: z.array(z.string()).optional().describe('첨부할 PC 파일의 절대 경로'),
+        attachments: z
+          .array(z.string())
+          .optional()
+          .describe(
+            '첨부할 PC 파일의 절대 경로. 임시 폴더·앱 데이터 폴더·점으로 시작하는 폴더의 파일은 첨부할 수 없으니, 첨부할 파일을 새로 만들 때는 다운로드나 문서 폴더에 저장한다',
+          ),
         reply_to: z.object({ folder: folderSchema, uid: uidSchema }).optional().describe('답장할 원본 메일'),
         reply_mode: z.enum(REPLY_MODES).default('reply_all'),
       },
@@ -174,20 +195,35 @@ function requireAccount(context: ToolContext, email: string): Account {
 }
 
 function readView(mail: ParsedMessage) {
-  const text = bodyTextOf(mail.plain, mail.html);
-  const truncated = text.length > MAX_BODY_CHARS;
+  const { text, htmlTruncated } = bodyTextOf(mail.plain, mail.html);
+  const truncated = htmlTruncated || text.length > MAX_BODY_CHARS;
+  const to = limitList(mail.to, MAX_LISTED_ADDRESSES);
+  const cc = limitList(mail.cc, MAX_LISTED_ADDRESSES);
+  const replyTo = limitList(mail.replyTo, MAX_LISTED_ADDRESSES);
+  const attachments = limitList(mail.attachments, MAX_LISTED_ATTACHMENTS);
   return {
     from: mail.from ? formatAddress(mail.from) : undefined,
-    to: mail.to.map(formatAddress),
-    cc: mail.cc.map(formatAddress),
-    replyTo: mail.replyTo.map(formatAddress),
+    to: to.items.map(formatAddress),
+    toTruncated: to.truncated,
+    cc: cc.items.map(formatAddress),
+    ccTruncated: cc.truncated,
+    replyTo: replyTo.items.map(formatAddress),
+    replyToTruncated: replyTo.truncated,
     date: mail.dateValue ? toLocalIso(mail.dateValue) : '날짜 모름',
-    subject: mail.subject,
-    messageId: mail.messageId,
-    body: truncated ? text.slice(0, MAX_BODY_CHARS) : text,
+    subject: mail.subject.slice(0, MAX_HEADER_TEXT_CHARS),
+    subjectTruncated: mail.subject.length > MAX_HEADER_TEXT_CHARS,
+    messageId: mail.messageId?.slice(0, MAX_HEADER_TEXT_CHARS),
+    messageIdTruncated: (mail.messageId?.length ?? 0) > MAX_HEADER_TEXT_CHARS,
+    body: text.slice(0, MAX_BODY_CHARS),
     bodyTruncated: truncated,
-    attachments: mail.attachments.map((a) => ({ index: a.index, fileName: a.fileName, contentType: a.contentType, size: a.size })),
+    bodyNotice: truncated ? BODY_TRUNCATED_NOTICE : undefined,
+    attachments: attachments.items.map((a) => ({ index: a.index, fileName: a.fileName, contentType: a.contentType, size: a.size })),
+    attachmentsTruncated: attachments.truncated,
   };
+}
+
+function limitList<T>(items: T[], max: number): { items: T[]; truncated: boolean } {
+  return { items: items.slice(0, max), truncated: items.length > max };
 }
 
 interface DownloadInput {
@@ -199,20 +235,40 @@ interface DownloadInput {
 
 async function downloadAttachment(context: ToolContext, account: Account, input: DownloadInput) {
   if (input.save_dir && !isAbsolute(input.save_dir)) throw new MailError(`저장 폴더(save_dir)는 절대 경로여야 합니다: ${input.save_dir}`);
+  const dir = allowedPath(input.save_dir ?? join(homedir(), 'Downloads'));
   const mail = await parseMail(await fetchSource(context.connections, account, input.folder, input.uid));
   const attachment = mail.attachments.find((a) => a.index === input.index);
   if (!attachment) throw new MailError(`[${account.label}] 해당 첨부를 찾을 수 없습니다: ${input.index}번`);
 
-  const dir = input.save_dir ?? join(homedir(), 'Downloads');
   const path = uniqueSavePath(dir, attachment.fileName, existsSync);
+  if (isExecutableName(basename(path))) {
+    throw new MailError(`실행 파일은 저장하지 않습니다: ${attachment.fileName}. 필요하면 웹메일에서 직접 받아 주세요.`);
+  }
   try {
     mkdirSync(dir, { recursive: true });
     // 확인과 쓰기 사이에 같은 이름이 생기면 덮어쓰지 않고 실패하게 한다.
     writeFileSync(path, attachment.content, { flag: 'wx' });
   } catch (error) {
-    throw new MailError(`파일을 저장할 수 없습니다: ${path} (${(error as NodeJS.ErrnoException).code ?? String(error)})`);
+    throw new MailError(`파일을 저장할 수 없습니다: ${path} (${errorCode(error)})`);
   }
-  return { path, size: attachment.size, contentType: attachment.contentType };
+  const markFailure = markAsDownloaded(path);
+  const warnings = markFailure
+    ? [`"인터넷에서 받은 파일" 표시를 붙이지 못했습니다. 파일을 열 때 Windows 보안 경고가 나타나지 않으니 주의해 주세요: ${path} (${markFailure})`]
+    : [];
+  return { path, size: attachment.size, contentType: attachment.contentType, warnings };
+}
+
+/** 경로 규칙(PRD §8-1)에 걸리면 오류. 걸리지 않으면 정규화한 경로를 돌려준다. */
+function allowedPath(target: string): string {
+  const check = checkPath(target);
+  if (check.blockedReason) {
+    throw new MailError(`이 위치는 사용할 수 없습니다: ${check.path} (${check.blockedReason}). 다운로드·문서 폴더 등 일반 폴더를 지정해 주세요.`);
+  }
+  return check.path;
+}
+
+function errorCode(error: unknown): string {
+  return (error as NodeJS.ErrnoException).code ?? String(error);
 }
 
 interface DraftInput {
@@ -229,8 +285,8 @@ interface DraftInput {
 async function createDraft(context: ToolContext, account: Account, input: DraftInput) {
   const cc = addressesOrThrow(input.cc ?? [], '참조');
   const bcc = addressesOrThrow(input.bcc ?? [], '숨은참조');
-  const attachmentPaths = input.attachments ?? [];
-  checkAttachmentFiles(attachmentPaths);
+  const attachmentFiles = checkAttachmentFiles(input.attachments ?? []);
+  const attachmentPaths = attachmentFiles.map((f) => f.path);
 
   const draft = input.reply_to
     ? await replyDraft(context, account, input, input.reply_to, cc, bcc)
@@ -244,7 +300,8 @@ async function createDraft(context: ToolContext, account: Account, input: DraftI
     cc: draft.message.cc.map(formatAddress),
     bcc: draft.message.bcc.map(formatAddress),
     subject: draft.message.subject,
-    attachments: attachmentPaths.map((p) => basename(p)),
+    // 어느 폴더의 파일이 올라갔는지 사용자가 확인할 수 있게 이름이 아니라 전체 경로를 보여 준다.
+    attachments: attachmentFiles,
     warnings: draft.warnings,
     notice: '메일은 발송되지 않았습니다. 웹메일 임시보관함에서 확인하신 뒤 직접 발송해 주세요.',
   };
@@ -279,7 +336,8 @@ async function replyDraft(
     subject: mail.subject,
     messageId: mail.messageId,
     references: mail.references,
-    text: bodyTextOf(mail.plain, mail.html),
+    // 인용 원문도 read_email 본문과 같은 길이까지만 넣는다 (PRD §6-4).
+    text: bodyTextOf(mail.plain, mail.html).text.slice(0, MAX_BODY_CHARS),
   };
   const recipients = computeReplyRecipients({ original, myAddress: account.email, mode: input.reply_mode, extraCc, bcc });
   if (!recipients.to.length) throw new MailError('원본 메일에 보낸 사람(From·Reply-To)이 없어 답장 받는 사람을 정할 수 없습니다.');
@@ -304,14 +362,29 @@ function addressesOrThrow(inputs: string[], label: string): Address[] {
   return parsed.addresses;
 }
 
-function checkAttachmentFiles(paths: string[]): void {
-  for (const path of paths) {
-    if (!isAbsolute(path)) throw new MailError(`첨부 파일 경로는 절대 경로여야 합니다: ${path}`);
-    try {
-      accessSync(path, constants.R_OK);
-    } catch (error) {
-      throw new MailError(`첨부 파일을 읽을 수 없습니다: ${path} (${(error as NodeJS.ErrnoException).code ?? String(error)})`);
-    }
-    if (!statSync(path).isFile()) throw new MailError(`첨부 파일이 아니라 폴더입니다: ${path}`);
+interface AttachmentFile {
+  path: string;
+  size: number;
+}
+
+function checkAttachmentFiles(inputs: string[]): AttachmentFile[] {
+  const files = inputs.map(checkAttachmentFile);
+  const total = files.reduce((sum, f) => sum + f.size, 0);
+  if (total > MAX_DRAFT_ATTACHMENT_BYTES) {
+    throw new MailError(`첨부 파일이 너무 큽니다: 합계 ${megabytes(total)}MB(최대 ${MAX_DRAFT_ATTACHMENTS_MB}MB).`);
   }
+  return files;
+}
+
+function checkAttachmentFile(input: string): AttachmentFile {
+  if (!isAbsolute(input)) throw new MailError(`첨부 파일 경로는 절대 경로여야 합니다: ${input}`);
+  const path = allowedPath(input);
+  try {
+    accessSync(path, constants.R_OK);
+  } catch (error) {
+    throw new MailError(`첨부 파일을 읽을 수 없습니다: ${path} (${errorCode(error)})`);
+  }
+  const stat = statSync(path);
+  if (!stat.isFile()) throw new MailError(`첨부 파일이 아니라 폴더입니다: ${path}`);
+  return { path, size: stat.size };
 }

@@ -56,6 +56,7 @@ const REPLY_SUBJECT_PREFIX = "Re: ";
 const REPLY_SUBJECT_PATTERN = /^\s*re:/i;
 const ORIGINAL_MESSAGE_SEPARATOR = "-----Original Message-----";
 const ADDRESS_LIST_SEPARATOR = ", ";
+const LINE_BREAK_PATTERN = /\r\n|\r|\n/g;
 
 // 표시 이름 + <주소>. 이름에 쉼표가 있어도 입력 하나가 주소 하나라서 쉼표로 나누지 않는다.
 const NAMED_ADDRESS_PATTERN = /^(.*?)\s*<([^<>]*)>$/s;
@@ -159,14 +160,19 @@ function formatAddressList(addresses: readonly Address[]): string {
   return addresses.map(formatAddress).join(ADDRESS_LIST_SEPARATOR);
 }
 
+// 원본 제목·이름에 줄바꿈을 넣어 인용 안에 가짜 머리말 줄을 만들지 못하게 한다.
+function oneLine(value: string): string {
+  return value.replace(LINE_BREAK_PATTERN, " ");
+}
+
 export function buildQuotedBody(body: string, original: OriginalMessage): string {
   const headerLines = [
     ORIGINAL_MESSAGE_SEPARATOR,
-    `From: ${formatAddressList(original.from)}`,
-    `To: ${formatAddressList(original.to)}`,
+    `From: ${oneLine(formatAddressList(original.from))}`,
+    `To: ${oneLine(formatAddressList(original.to))}`,
   ];
-  if (original.cc.length > 0) headerLines.push(`Cc: ${formatAddressList(original.cc)}`);
-  headerLines.push(`Date: ${original.date}`, `Subject: ${original.subject}`);
+  if (original.cc.length > 0) headerLines.push(`Cc: ${oneLine(formatAddressList(original.cc))}`);
+  headerLines.push(`Date: ${oneLine(original.date)}`, `Subject: ${oneLine(original.subject)}`);
 
   return [body, "", ...headerLines, "", original.text].join("\n");
 }

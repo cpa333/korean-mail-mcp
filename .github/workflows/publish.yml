@@ -4,27 +4,69 @@ on:
   push:
     tags: ['v*']
 
-permissions:
-  contents: read
-  # npm Trusted Publishing(OIDC)과 provenance에 필요하다. 배포 토큰은 쓰지 않는다.
-  id-token: write
+# 권한은 작업(job)마다 따로 준다. 배포 권한은 빌드 결과물을 올리기만 하는 publish 작업에만 있다 (PRD §3-0).
+permissions: {}
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tarball: ${{ steps.pack.outputs.tarball }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      # 승인 대기로 올리기(npm stage publish)는 npm CLI 11.15.0 이상이 필요하다.
-      - run: npm install -g npm@latest
+          # 태그 커밋이 main에 있는지 확인하려면 main의 이력이 필요하다.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.3
+          # 캐시가 오염되면 빌드 결과물이 바뀔 수 있어 쓰지 않는다.
+          package-manager-cache: false
+      - run: npm install -g npm@12.2.2
       - name: 태그와 package.json 버전이 같은지 확인
         run: node -e "const v = 'v' + require('./package.json').version; if (v !== process.env.GITHUB_REF_NAME) { console.error(v + ' != ' + process.env.GITHUB_REF_NAME); process.exit(1); }"
-      - run: npm ci
+      - name: 태그 커밋이 main에 있는지 확인
+        run: |
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "태그 커밋이 main에 없습니다: $(git rev-parse HEAD)" >&2
+            exit 1
+          fi
+      # 의존성의 설치 스크립트를 실행하지 않는다. 스크립트 없이도 빌드 결과가 같다 (PRD §3-0).
+      - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - id: pack
+        run: echo "tarball=$(npm pack --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package
+          path: ${{ steps.pack.outputs.tarball }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # 저장소를 받지 않고 build 작업의 tarball만 올리므로 저장소 읽기 권한도 주지 않는다.
+    permissions:
+      # npm Trusted Publishing(OIDC)과 provenance에 필요하다. 배포 토큰은 쓰지 않는다.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: package
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.3
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      # 승인 대기로 올리기(npm stage publish)는 npm CLI 11.15.0 이상이 필요하다.
+      - run: npm install -g npm@12.2.2
       # Trusted Publisher 권한이 'npm stage publish'뿐이라 공개는 사람이 npmjs.com에서 승인해야 한다 (PRD §3-0).
-      - run: npm stage publish --provenance
+      # 저장소 코드를 실행하지 않도록 build 작업이 만든 tarball을 그대로 올린다.
+      - run: npm stage publish "./$TARBALL" --provenance
+        env:
+          TARBALL: ${{ needs.build.outputs.tarball }}

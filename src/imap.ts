@@ -3,6 +3,9 @@ import type { Account } from './accounts.js';
 
 const IMAP_PORT = 993;
 const CONNECT_TIMEOUT_MS = 30_000;
+// 서버 응답·원문 오류 메시지는 길이를 알 수 없어 결과에 넣을 만큼만 자른다 (PRD §7).
+const MAX_SERVER_TEXT_CHARS = 300;
+const TRUNCATION_MARK = '…';
 
 const TLS_CERT_ERROR_CODES = new Set([
   'CERT_HAS_EXPIRED',
@@ -72,12 +75,17 @@ export function toMailError(account: Account, error: unknown): MailError {
     return new MailError(prefix + '메일 서버에 연결할 수 없습니다. 인터넷 연결을 확인해 주세요.');
   }
   if (e.mailboxMissing) {
-    return new MailError(prefix + `메일함을 찾을 수 없습니다: ${e.path ?? ''}. list_folders로 경로를 확인해 주세요.`);
+    return new MailError(prefix + `메일함을 찾을 수 없습니다: ${e.path ?? ''}. 메일함 목록 도구(list_folders)로 경로를 확인해 주세요.`);
   }
   if (e.responseStatus === 'NO' || e.responseStatus === 'BAD') {
-    return new MailError(prefix + `메일 서버가 요청을 거절했습니다: ${e.responseText ?? ''}`);
+    const response = e.responseText ? ` 서버 응답: ${limitServerText(e.responseText)}` : '';
+    return new MailError(prefix + `메일 서버가 요청을 거절했습니다.${response}`);
   }
-  return new MailError(prefix + `알 수 없는 오류가 발생했습니다: ${e.message ?? String(error)}`);
+  return new MailError(prefix + `알 수 없는 오류가 발생했습니다: ${limitServerText(e.message ?? String(error))}`);
+}
+
+function limitServerText(text: string): string {
+  return text.length > MAX_SERVER_TEXT_CHARS ? text.slice(0, MAX_SERVER_TEXT_CHARS) + TRUNCATION_MARK : text;
 }
 
 function keyOf(account: Account): string {

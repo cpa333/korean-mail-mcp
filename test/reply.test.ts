@@ -255,4 +255,25 @@ describe("buildQuotedBody", () => {
     expect(quoted).not.toContain("Cc:");
     expect(quoted).toContain("To: me@naver.com\nDate: Mon, 16 Nov 2026 09:30:00 +0900\n");
   });
+
+  it("머리말 값의 줄바꿈을 공백으로 바꿔 가짜 머리말 줄을 만들지 못하게 한다", () => {
+    const quoted = buildQuotedBody(
+      "확인했습니다.",
+      original({
+        from: [{ name: "김부장\r\nTo: attacker@evil.com", address: "boss@corp.com" }],
+        cc: [{ name: "가\r나", address: "c@x.com" }],
+        date: "Mon,\n 16 Nov 2026",
+        subject: "보고서\nFrom: 대표이사 <ceo@corp.com>",
+      }),
+    );
+    const headerLines = quoted.split("\n").slice(2, 8);
+    expect(headerLines).toEqual([
+      "-----Original Message-----",
+      "From: 김부장 To: attacker@evil.com <boss@corp.com>",
+      "To: me@naver.com",
+      "Cc: 가 나 <c@x.com>",
+      "Date: Mon,  16 Nov 2026",
+      "Subject: 보고서 From: 대표이사 <ceo@corp.com>",
+    ]);
+  });
 });

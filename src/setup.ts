@@ -1,6 +1,16 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { checkbox, confirm, input, password } from '@inquirer/prompts';
-import { ACCOUNT_IDS, envKeys, makeAccount, serviceOf, type AccountId } from './accounts.js';
+import { confirm, input, password, select } from '@inquirer/prompts';
+import {
+  SERVICE_IDS,
+  envKeys,
+  loadAccounts,
+  makeAccount,
+  nextFreeSlot,
+  sameEmail,
+  serviceOf,
+  type Account,
+  type ServiceId,
+} from './accounts.js';
 import { checkLogin, MailError } from './imap.js';
 
 const SERVER_NAME = 'korean-mail';
@@ -9,8 +19,9 @@ const NPX_CACHE_MARKER = '_npx';
 // .cmd로 설치된 claude는 셸을 거쳐야 실행된다. 셸이 해석할 글자가 값에 있으면 등록을 맡기지 않는다.
 const SHELL_SAFE_VALUE = /^[A-Za-z0-9@._+-]+$/;
 
-type Env = Record<string, string>;
+export type Env = Record<string, string>;
 type Scope = 'user' | 'local';
+type Action = 'add' | 'password' | 'remove' | 'done';
 
 interface Existing {
   scope: Scope;
@@ -22,66 +33,115 @@ interface ClaudeCli {
   viaShell: boolean;
 }
 
-/** PRD §3-1. 계정을 묻고, 접속을 확인하고, Claude Code에 등록한다. */
+interface Credentials {
+  email: string;
+  password: string;
+}
+
+/** PRD §3-1. 계정을 더하거나 바꾸거나 빼고, 접속을 확인하고, Claude Code에 등록한다. */
 export async function runSetup(): Promise<void> {
   console.log('\nkorean-mail-mcp 설정\n');
   const cli = findClaudeCli();
   const existing = cli ? readExisting(cli) : undefined;
-  printRegistered(existing);
-
-  const ids = await checkbox<AccountId>({
-    message: '연결(추가·변경)할 메일을 고르세요 (스페이스로 선택, Enter로 진행)',
-    choices: ACCOUNT_IDS.map((id) => ({ name: serviceOf(id).label, value: id })),
-    required: true,
-  });
-
-  const env: Env = { ...existing?.env };
+  let env: Env = { ...existing?.env };
   let changed = false;
-  for (const id of ids) {
-    const credentials = await askAccount(id);
-    if (!credentials) continue;
-    const keys = envKeys(id);
-    env[keys.email] = credentials.email;
-    env[keys.password] = credentials.password;
-    changed = true;
+
+  for (;;) {
+    const accounts = loadAccounts(env).accounts;
+    printAccounts(accounts);
+    const action = await chooseAction(accounts);
+    if (action === 'done') break;
+    const next = await applyAction(action, env, accounts);
+    if (next) {
+      env = next;
+      changed = true;
+    }
   }
+
   if (!changed) {
-    console.log('\n바뀐 계정이 없어 등록을 그대로 둡니다.');
+    console.log('\n바뀐 것이 없어 등록을 그대로 둡니다.');
     return;
   }
   register(cli, existing, env);
 }
 
-function printRegistered(existing: Existing | undefined): void {
-  if (!existing) return;
-  for (const id of ACCOUNT_IDS) {
-    const email = existing.env[envKeys(id).email];
-    if (email) console.log(`등록됨: ${serviceOf(id).label} ${email}`);
-  }
+function printAccounts(accounts: Account[]): void {
+  console.log('');
+  if (!accounts.length) console.log('등록된 계정이 없습니다.');
+  for (const account of accounts) console.log(`등록됨: ${account.label}`);
   console.log('');
 }
 
-async function askAccount(id: AccountId): Promise<{ email: string; password: string } | undefined> {
-  const service = serviceOf(id);
-  console.log(`\n[${service.label} 연결 준비]`);
-  for (const step of service.setupSteps) console.log(` ${step}`);
-  console.log(` 자세한 안내: ${service.guideUrl}\n`);
-  if (await confirm({ message: '자세한 안내 페이지를 브라우저로 열까요?', default: true })) openBrowser(service.guideUrl);
+async function chooseAction(accounts: Account[]): Promise<Action> {
+  const choices: { name: string; value: Action }[] = [{ name: '계정 추가', value: 'add' }];
+  if (accounts.length) {
+    choices.push({ name: '비밀번호 바꾸기', value: 'password' }, { name: '계정 빼기', value: 'remove' });
+  }
+  choices.push({ name: '끝내기 (바뀐 내용 등록)', value: 'done' });
+  return select({ message: '무엇을 할까요?', choices });
+}
+
+async function applyAction(action: Exclude<Action, 'done'>, env: Env, accounts: Account[]): Promise<Env | undefined> {
+  if (action === 'add') {
+    const service = await select<ServiceId>({
+      message: '어떤 메일인가요?',
+      choices: SERVICE_IDS.map((id) => ({ name: serviceOf(id).label, value: id })),
+    });
+    const credentials = await askCredentials(service);
+    if (!credentials) return undefined;
+    if (accounts.some((a) => sameEmail(a.email, credentials.email))) console.log('이미 등록된 주소라 비밀번호를 바꿉니다.');
+    return withAccount(env, accounts, service, credentials);
+  }
+
+  const account = await chooseAccount(accounts, action === 'password' ? '비밀번호를 바꿀 계정' : '뺄 계정');
+  if (action === 'password') {
+    const credentials = await askCredentials(account.service, account.email);
+    return credentials ? withAccount(env, accounts, account.service, credentials) : undefined;
+  }
+  if (!(await confirm({ message: `${account.label} 계정을 뺄까요?`, default: false }))) return undefined;
+  return withoutAccount(env, account);
+}
+
+async function chooseAccount(accounts: Account[], message: string): Promise<Account> {
+  return select({ message, choices: accounts.map((a) => ({ name: a.label, value: a })) });
+}
+
+/** 같은 주소가 있으면 그 자리의 값을 바꾸고, 없으면 서비스의 빈 번호에 더한다 (PRD §4). */
+export function withAccount(env: Env, accounts: Account[], service: ServiceId, credentials: Credentials): Env {
+  const same = accounts.find((a) => sameEmail(a.email, credentials.email));
+  const keys = same ? envKeys(same.service, same.slot) : envKeys(service, nextFreeSlot(accounts, service));
+  return { ...env, [keys.email]: credentials.email, [keys.password]: credentials.password };
+}
+
+export function withoutAccount(env: Env, account: Account): Env {
+  const keys = envKeys(account.service, account.slot);
+  const next = { ...env };
+  delete next[keys.email];
+  delete next[keys.password];
+  return next;
+}
+
+async function askCredentials(service: ServiceId, fixedEmail?: string): Promise<Credentials | undefined> {
+  const info = serviceOf(service);
+  console.log(`\n[${info.label} 연결 준비]`);
+  for (const step of info.setupSteps) console.log(` ${step}`);
+  console.log(` 자세한 안내: ${info.guideUrl}\n`);
+  if (await confirm({ message: '자세한 안내 페이지를 브라우저로 열까요?', default: true })) openBrowser(info.guideUrl);
 
   for (;;) {
-    const email = (
-      await input({ message: `${service.label} 메일 주소`, validate: (v) => v.includes('@') || '메일 주소 전체를 넣어 주세요' })
-    ).trim();
-    const appPassword = (await password({ message: '앱 비밀번호', mask: '*' })).trim();
+    const email =
+      fixedEmail ??
+      (await input({ message: `${info.label} 메일 주소`, validate: (v) => v.includes('@') || '메일 주소 전체를 넣어 주세요' })).trim();
+    const appPassword = (await password({ message: `${email} 앱 비밀번호`, mask: '*' })).trim();
     console.log('접속 확인 중...');
     try {
-      const count = await checkLogin(makeAccount(id, email, appPassword));
+      const count = await checkLogin(makeAccount(service, email, appPassword));
       console.log(`✅ 연결 성공 (받은편지함 ${count.toLocaleString()}통)`);
       return { email, password: appPassword };
     } catch (error) {
       if (!(error instanceof MailError)) throw error;
       console.log(`❌ ${error.message}`);
-      console.log(`   ${service.authHint}`);
+      console.log(`   ${info.authHint}`);
       if (!(await confirm({ message: '다시 입력할까요?', default: true }))) return undefined;
     }
   }
@@ -119,16 +179,16 @@ function readExisting(cli: ClaudeCli): Existing | undefined {
   const result = runClaude(cli, ['mcp', 'get', SERVER_NAME]);
   if (result.status !== 0) return undefined;
   const output = result.stdout;
-  const scopeLine = output.match(/Scope:\s*(\w+)/)?.[1]?.toLowerCase();
-  if (scopeLine !== 'user' && scopeLine !== 'local') {
-    throw new Error(`이미 등록된 ${SERVER_NAME}의 범위(${scopeLine ?? '알 수 없음'})를 이 설정이 다룰 수 없습니다. 기존 등록을 지우고 다시 실행해 주세요.`);
+  const scope = output.match(/Scope:\s*(\w+)/)?.[1]?.toLowerCase();
+  if (scope !== 'user' && scope !== 'local') {
+    throw new Error(`이미 등록된 ${SERVER_NAME}의 범위(${scope ?? '알 수 없음'})를 이 설정이 다룰 수 없습니다. 기존 등록을 지우고 다시 실행해 주세요.`);
   }
   const env = parseEnvironment(output);
   if (!env) {
     // 기존 값을 못 읽고 다시 등록하면 다른 계정이 사라진다 (PRD §3-1).
     throw new Error(`이미 등록된 ${SERVER_NAME}의 계정 정보를 읽지 못했습니다. 기존 등록을 지우지 않고 멈춥니다.`);
   }
-  return { scope: scopeLine, env };
+  return { scope, env };
 }
 
 export function parseEnvironment(output: string): Env | undefined {
@@ -145,13 +205,18 @@ export function parseEnvironment(output: string): Env | undefined {
 }
 
 function register(cli: ClaudeCli | undefined, existing: Existing | undefined, env: Env): void {
+  if (!loadAccounts(env).accounts.length) {
+    if (cli && existing) runClaude(cli, ['mcp', 'remove', SERVER_NAME, '-s', existing.scope]);
+    console.log(`\n계정을 모두 빼서 ${SERVER_NAME} 등록을 지웠습니다. Claude Code를 다시 시작하면 반영됩니다.`);
+    return;
+  }
   const server = serverCommand();
-  const envArgs = Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
   const unsafe = cli?.viaShell && Object.values(env).some((v) => !SHELL_SAFE_VALUE.test(v));
   if (!cli || unsafe) {
     printManualCommand(env, server, cli ? '비밀번호에 셸이 해석할 수 있는 글자가 있어' : 'claude 명령을 찾지 못해');
     return;
   }
+  const envArgs = Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
   if (existing) runClaude(cli, ['mcp', 'remove', SERVER_NAME, '-s', existing.scope]);
   const added = runClaude(cli, ['mcp', 'add', '--scope', 'user', SERVER_NAME, ...envArgs, '--', ...server]);
   if (added.status !== 0) {

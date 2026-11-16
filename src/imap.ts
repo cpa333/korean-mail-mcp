@@ -1,5 +1,5 @@
 import { ImapFlow } from 'imapflow';
-import type { Account, AccountId } from './accounts.js';
+import type { Account } from './accounts.js';
 
 const IMAP_PORT = 993;
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -80,14 +80,18 @@ export function toMailError(account: Account, error: unknown): MailError {
   return new MailError(prefix + `알 수 없는 오류: ${e.message ?? String(error)}`);
 }
 
+function keyOf(account: Account): string {
+  return account.email.toLowerCase();
+}
+
 /**
  * 계정마다 연결 하나를 여러 도구 호출에 재사용한다. 우리 쪽에서는 끊지 않고,
  * 서버가 끊으면 다음 호출 때 다시 연다 (PRD §5).
  */
 export class ImapConnections {
-  private readonly pending = new Map<AccountId, Promise<ImapFlow>>();
+  private readonly pending = new Map<string, Promise<ImapFlow>>();
   // 틀린 비밀번호로 로그인을 되풀이하면 서버가 계정을 막을 수 있어, 거절된 계정은 재시작 전까지 다시 시도하지 않는다.
-  private readonly authRejected = new Set<AccountId>();
+  private readonly authRejected = new Set<string>();
 
   async withMailbox<T>(
     account: Account,
@@ -110,16 +114,16 @@ export class ImapConnections {
       const client = await this.clientFor(account);
       return await work(client);
     } catch (error) {
-      if ((error as ImapErrorFields).authenticationFailed) this.authRejected.add(account.id);
+      if ((error as ImapErrorFields).authenticationFailed) this.authRejected.add(keyOf(account));
       throw toMailError(account, error);
     }
   }
 
   private async clientFor(account: Account): Promise<ImapFlow> {
-    if (this.authRejected.has(account.id)) {
+    if (this.authRejected.has(keyOf(account))) {
       throw new MailError(`[${account.label}] ${AUTH_REJECTED_MESSAGE} 설정을 고친 뒤 Claude Code를 다시 시작해 주세요.`);
     }
-    const existing = this.pending.get(account.id);
+    const existing = this.pending.get(keyOf(account));
     if (!existing) return this.reconnect(account, undefined);
     const client = await existing;
     return client.usable ? client : this.reconnect(account, existing);
@@ -130,12 +134,12 @@ export class ImapConnections {
    * 이미 누군가 새로 연결 중이면 그 연결을 함께 기다린다.
    */
   private reconnect(account: Account, stale: Promise<ImapFlow> | undefined): Promise<ImapFlow> {
-    const current = this.pending.get(account.id);
+    const current = this.pending.get(keyOf(account));
     if (current && current !== stale) return current;
     const connecting = this.connect(account);
-    this.pending.set(account.id, connecting);
+    this.pending.set(keyOf(account), connecting);
     connecting.catch(() => {
-      if (this.pending.get(account.id) === connecting) this.pending.delete(account.id);
+      if (this.pending.get(keyOf(account)) === connecting) this.pending.delete(keyOf(account));
     });
     return connecting;
   }
@@ -158,7 +162,7 @@ function newClient(account: Account): ImapFlow {
   });
   // 'error' 이벤트에 듣는 쪽이 없으면 Node 프로세스가 죽는다. 원인은 다음 호출에서 오류로 드러난다.
   client.on('error', (error: ImapErrorFields) => {
-    console.error(`[${account.id}] IMAP 연결 오류: ${error.code ?? 'unknown'}`);
+    console.error(`[${account.service}#${account.slot}] IMAP 연결 오류: ${error.code ?? 'unknown'}`);
   });
   return client;
 }

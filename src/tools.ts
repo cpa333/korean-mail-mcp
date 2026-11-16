@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { ACCOUNT_IDS, noAccountsMessage, notConfiguredMessage, type Account, type AccountId } from './accounts.js';
+import { accountList, noAccountsMessage, sameEmail, serviceOf, unknownAccountMessage, type Account } from './accounts.js';
 import { parseDay, toLocalIso } from './dates.js';
 import { buildDraft } from './drafts.js';
 import { ImapConnections, MailError } from './imap.js';
@@ -40,7 +40,6 @@ export interface ToolContext {
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
 
-const accountSchema = z.enum(ACCOUNT_IDS).describe('메일 계정: naver 또는 daum');
 const folderSchema = z.string().min(1).describe('메일함 경로. list_folders의 path 값');
 const uidSchema = z.number().int().positive().describe('search_emails가 돌려준 uid');
 const daySchema = z
@@ -49,13 +48,16 @@ const daySchema = z
   .refine((text) => parseDay(text) !== undefined, '실제로 있는 날짜가 아닙니다');
 
 export function registerTools(server: McpServer, context: ToolContext): void {
+  const configured = context.accounts.length ? `설정된 계정: ${accountList(context.accounts)}` : '설정된 계정이 없다';
+  const accountSchema = z.string().min(1).describe(`메일 계정의 메일 주소. ${configured}`);
+
   server.registerTool(
     'list_accounts',
-    { description: '설정된 메일 계정(네이버·다음) 목록과 메일 주소를 보여 준다.' },
+    { description: '설정된 메일 계정 목록(메일 주소, 서비스)을 보여 준다.' },
     () =>
       runTool(context, async () => {
         if (!context.accounts.length) throw new MailError(noAccountsMessage());
-        return { accounts: context.accounts.map((a) => ({ account: a.id, email: a.email })) };
+        return { accounts: context.accounts.map((a) => ({ account: a.email, service: serviceOf(a.service).label })) };
       }),
   );
 
@@ -161,10 +163,10 @@ function errorResult(message: string): ToolResult {
   return { content: [{ type: 'text', text: message }], isError: true };
 }
 
-function requireAccount(context: ToolContext, id: AccountId): Account {
+function requireAccount(context: ToolContext, email: string): Account {
   if (!context.accounts.length) throw new MailError(noAccountsMessage());
-  const account = context.accounts.find((a) => a.id === id);
-  if (!account) throw new MailError(notConfiguredMessage(id));
+  const account = context.accounts.find((a) => sameEmail(a.email, email.trim()));
+  if (!account) throw new MailError(unknownAccountMessage(email, context.accounts));
   return account;
 }
 

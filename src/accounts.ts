@@ -1,5 +1,5 @@
-export const ACCOUNT_IDS = ['naver', 'daum'] as const;
-export type AccountId = (typeof ACCOUNT_IDS)[number];
+export const SERVICE_IDS = ['naver', 'daum'] as const;
+export type ServiceId = (typeof SERVICE_IDS)[number];
 
 export interface Service {
   label: string;
@@ -13,7 +13,7 @@ export interface Service {
   authHint: string;
 }
 
-const SERVICES: Record<AccountId, Service> = {
+const SERVICES: Record<ServiceId, Service> = {
   naver: {
     label: '네이버',
     envPrefix: 'NAVER',
@@ -45,27 +45,38 @@ const SERVICES: Record<AccountId, Service> = {
   },
 };
 
-export function serviceOf(id: AccountId): Service {
+const FIRST_SLOT = 1;
+// NAVER_EMAIL(첫 계정), NAVER_2_EMAIL, NAVER_3_EMAIL … (PRD §4)
+const EMAIL_KEY = /^([A-Z]+)(?:_(\d+))?_EMAIL$/;
+
+export function serviceOf(id: ServiceId): Service {
   return SERVICES[id];
 }
 
 export interface Account {
-  id: AccountId;
-  label: string;
+  service: ServiceId;
+  /** 환경변수 번호. 1이면 번호 없는 키 */
+  slot: number;
   email: string;
+  /** 오류·목록에 쓰는 이름, 예: "네이버 me@naver.com" */
+  label: string;
   host: string;
   loginName: string;
   password: string;
 }
 
-export function makeAccount(id: AccountId, email: string, password: string): Account {
-  const service = SERVICES[id];
-  return { id, label: service.label, email, host: service.host, loginName: service.loginName(email), password };
+export function makeAccount(service: ServiceId, email: string, password: string, slot = FIRST_SLOT): Account {
+  const s = SERVICES[service];
+  return { service, slot, email, label: `${s.label} ${email}`, host: s.host, loginName: s.loginName(email), password };
 }
 
-export function envKeys(id: AccountId): { email: string; password: string } {
-  const { envPrefix } = SERVICES[id];
-  return { email: `${envPrefix}_EMAIL`, password: `${envPrefix}_APP_PASSWORD` };
+export function envKeys(service: ServiceId, slot: number): { email: string; password: string } {
+  const base = slot === FIRST_SLOT ? SERVICES[service].envPrefix : `${SERVICES[service].envPrefix}_${slot}`;
+  return { email: `${base}_EMAIL`, password: `${base}_APP_PASSWORD` };
+}
+
+function serviceByPrefix(prefix: string): ServiceId | undefined {
+  return SERVICE_IDS.find((id) => SERVICES[id].envPrefix === prefix);
 }
 
 export interface LoadedAccounts {
@@ -73,35 +84,49 @@ export interface LoadedAccounts {
   warnings: string[];
 }
 
-export function loadAccounts(env: NodeJS.ProcessEnv): LoadedAccounts {
+export function loadAccounts(env: Record<string, string | undefined>): LoadedAccounts {
   const accounts: Account[] = [];
   const warnings: string[] = [];
-  for (const id of ACCOUNT_IDS) {
-    const { label } = SERVICES[id];
-    const keys = envKeys(id);
+  for (const key of Object.keys(env)) {
+    const match = key.match(EMAIL_KEY);
+    const service = match ? serviceByPrefix(match[1]) : undefined;
+    if (!match || !service) continue;
+    const slot = match[2] ? Number(match[2]) : FIRST_SLOT;
+    const keys = envKeys(service, slot);
     const email = env[keys.email]?.trim();
     const password = env[keys.password]?.trim();
-    if (!email && !password) continue;
     if (!email || !password) {
-      warnings.push(`${label}: ${keys.email}과 ${keys.password}를 둘 다 넣어야 합니다. 이 계정은 건너뜁니다.`);
-      continue;
+      warnings.push(`${keys.email}과 ${keys.password}를 둘 다 넣어야 합니다. 이 계정은 건너뜁니다.`);
+    } else if (!email.includes('@')) {
+      warnings.push(`${keys.email}에는 메일 주소 전체를 넣어야 합니다. 이 계정은 건너뜁니다.`);
+    } else if (accounts.some((a) => sameEmail(a.email, email))) {
+      warnings.push(`${email}이(가) 두 번 설정되어 ${keys.email}은 건너뜁니다.`);
+    } else {
+      accounts.push(makeAccount(service, email, password, slot));
     }
-    if (!email.includes('@')) {
-      warnings.push(`${label}: ${keys.email}에는 메일 주소 전체를 넣어야 합니다. 이 계정은 건너뜁니다.`);
-      continue;
-    }
-    accounts.push(makeAccount(id, email, password));
   }
+  accounts.sort((a, b) => SERVICE_IDS.indexOf(a.service) - SERVICE_IDS.indexOf(b.service) || a.slot - b.slot);
   return { accounts, warnings };
 }
 
-function envKeysText(id: AccountId): string {
-  const keys = envKeys(id);
-  return `${keys.email}, ${keys.password}`;
+export function sameEmail(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
 }
 
-export function notConfiguredMessage(id: AccountId): string {
-  return `${SERVICES[id].label} 계정이 설정되지 않았습니다. 터미널에서 npx -y @cpal1828/korean-mail-mcp setup을 실행하거나 환경변수 ${envKeysText(id)}를 넣어 다시 등록해 주세요.`;
+/** 이 서비스에서 비어 있는 가장 작은 번호 (PRD §4) */
+export function nextFreeSlot(accounts: Account[], service: ServiceId): number {
+  const used = new Set(accounts.filter((a) => a.service === service).map((a) => a.slot));
+  let slot = FIRST_SLOT;
+  while (used.has(slot)) slot += 1;
+  return slot;
+}
+
+export function accountList(accounts: Account[]): string {
+  return accounts.map((a) => `${a.email}(${SERVICES[a.service].label})`).join(', ');
+}
+
+export function unknownAccountMessage(email: string, accounts: Account[]): string {
+  return `${email}는 설정된 계정이 아닙니다. 설정된 계정: ${accountList(accounts)}. 계정을 더하려면 터미널에서 npx -y @cpal1828/korean-mail-mcp setup을 실행해 주세요.`;
 }
 
 export function noAccountsMessage(): string {

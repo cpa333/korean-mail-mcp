@@ -27,7 +27,7 @@ const SERVICES: Record<ServiceId, Service> = {
       "   → '직접 입력'에 10자 이내 이름(예: mailmcp) → 생성. 비밀번호는 한 번만 보이니 바로 복사하세요.",
     ],
     guideUrl: 'https://help.naver.com/service/5640/contents/8584?osType=COMMONOS',
-    authHint: '네이버 로그인 비밀번호가 아니라 애플리케이션 비밀번호를 넣었는지, IMAP을 사용함으로 켰는지 확인하세요.',
+    authHint: '네이버 로그인 비밀번호가 아니라 애플리케이션 비밀번호를 넣었는지, IMAP을 사용함으로 설정했는지 확인해 주세요.',
   },
   daum: {
     label: '다음',
@@ -41,7 +41,7 @@ const SERVICES: Record<ServiceId, Service> = {
       '   (2025-12-01부터 다음 메일 앱 비밀번호는 여기서만 만듭니다. 카카오계정에서 만든 것은 안 됩니다)',
     ],
     guideUrl: 'https://cs.daum.net/faq/43/9234.html?faqId=31143',
-    authHint: '다음 회원 마이페이지에서 만든 앱 비밀번호인지(카카오계정 것은 안 됨), IMAP을 사용함으로 켰는지 확인하세요.',
+    authHint: '다음 회원 마이페이지에서 만든 앱 비밀번호인지(카카오계정에서 만든 비밀번호는 사용할 수 없습니다), IMAP을 사용함으로 설정했는지 확인해 주세요.',
   },
 };
 

@@ -52,8 +52,8 @@ export async function runSetup(): Promise<void> {
     const action = await chooseAction(accounts);
     if (action === 'save') break;
     if (action === 'cancel') {
-      if (!changed || (await confirm({ message: '바뀐 내용을 저장하지 않고 끝낼까요?', default: false }))) {
-        console.log('\n저장하지 않고 끝냅니다. 등록은 그대로입니다.');
+      if (!changed || (await confirm({ message: '변경 내용을 저장하지 않고 종료하시겠습니까?', default: false }))) {
+        console.log('\n저장하지 않고 종료합니다. 기존 등록은 그대로 유지됩니다.');
         return;
       }
       continue;
@@ -66,7 +66,7 @@ export async function runSetup(): Promise<void> {
   }
 
   if (!changed) {
-    console.log('\n바뀐 것이 없어 등록을 그대로 둡니다.');
+    console.log('\n변경된 내용이 없어 기존 등록을 유지합니다.');
     return;
   }
   register(cli, existing, env);
@@ -75,38 +75,44 @@ export async function runSetup(): Promise<void> {
 function printAccounts(accounts: Account[]): void {
   console.log('');
   if (!accounts.length) console.log('등록된 계정이 없습니다.');
-  for (const account of accounts) console.log(`등록됨: ${account.label}`);
+  for (const account of accounts) console.log(`등록된 계정: ${account.label}`);
   console.log('');
 }
 
 async function chooseAction(accounts: Account[]): Promise<Action> {
-  const choices: { name: string; value: Action }[] = [{ name: '계정 추가', value: 'add' }];
+  const choices: { name: string; value: Action }[] = [{ name: '계정을 추가합니다', value: 'add' }];
   if (accounts.length) {
-    choices.push({ name: '비밀번호 바꾸기', value: 'password' }, { name: '계정 삭제', value: 'remove' });
+    choices.push({ name: '비밀번호를 변경합니다', value: 'password' }, { name: '계정을 삭제합니다', value: 'remove' });
   }
-  choices.push({ name: '완료 (저장)', value: 'save' }, { name: '취소 (저장 안 함)', value: 'cancel' });
-  return select({ message: '무엇을 할까요?', choices });
+  choices.push(
+    { name: '완료: 변경 내용을 저장하고 종료합니다', value: 'save' },
+    { name: '취소: 저장하지 않고 종료합니다', value: 'cancel' },
+  );
+  return select({ message: '원하는 작업을 선택해 주세요.', choices });
 }
 
 async function applyAction(action: 'add' | 'password' | 'remove', env: Env, accounts: Account[]): Promise<Env | undefined> {
   if (action === 'add') {
     const service = await select<ServiceId>({
-      message: '어떤 메일인가요?',
+      message: '추가할 메일 서비스를 선택해 주세요.',
       choices: SERVICE_IDS.map((id) => ({ name: serviceOf(id).label, value: id })),
     });
     const credentials = await askCredentials(service);
     if (!credentials) return undefined;
-    if (accounts.some((a) => sameEmail(a.email, credentials.email))) console.log('이미 등록된 주소라 비밀번호를 바꿉니다.');
+    if (accounts.some((a) => sameEmail(a.email, credentials.email))) console.log('이미 등록된 주소이므로 비밀번호를 변경합니다.');
     return withAccount(env, accounts, service, credentials);
   }
 
-  const account = await chooseAccount(accounts, action === 'password' ? '비밀번호를 바꿀 계정' : '삭제할 계정');
+  const account = await chooseAccount(
+    accounts,
+    action === 'password' ? '비밀번호를 변경할 계정을 선택해 주세요.' : '삭제할 계정을 선택해 주세요.',
+  );
   if (action === 'password') {
     const credentials = await askCredentials(account.service, account.email);
     return credentials ? withAccount(env, accounts, account.service, credentials) : undefined;
   }
   const serviceLabel = serviceOf(account.service).label;
-  const message = `${account.email}을(를) 이 MCP에서 삭제할까요? (${serviceLabel} 계정과 메일은 그대로입니다)`;
+  const message = `${account.email} 계정을 이 MCP에서 삭제하시겠습니까? (${serviceLabel} 계정과 메일은 그대로 유지됩니다)`;
   if (!(await confirm({ message, default: false }))) return undefined;
   return withoutAccount(env, account);
 }
@@ -135,23 +141,28 @@ async function askCredentials(service: ServiceId, fixedEmail?: string): Promise<
   console.log(`\n[${info.label} 연결 준비]`);
   for (const step of info.setupSteps) console.log(` ${step}`);
   console.log(` 자세한 안내: ${info.guideUrl}\n`);
-  if (await confirm({ message: '자세한 안내 페이지를 브라우저로 열까요?', default: true })) openBrowser(info.guideUrl);
+  if (await confirm({ message: '자세한 안내 페이지를 브라우저로 여시겠습니까?', default: true })) openBrowser(info.guideUrl);
 
   for (;;) {
     const email =
       fixedEmail ??
-      (await input({ message: `${info.label} 메일 주소`, validate: (v) => v.includes('@') || '메일 주소 전체를 넣어 주세요' })).trim();
-    const appPassword = (await password({ message: `${email} 앱 비밀번호`, mask: '*' })).trim();
-    console.log('접속 확인 중...');
+      (
+        await input({
+          message: `${info.label} 메일 주소를 입력해 주세요.`,
+          validate: (v) => v.includes('@') || '메일 주소 전체를 입력해 주세요(예: me@naver.com).',
+        })
+      ).trim();
+    const appPassword = (await password({ message: `${email}의 앱 비밀번호를 입력해 주세요.`, mask: '*' })).trim();
+    console.log('접속을 확인하고 있습니다...');
     try {
       const count = await checkLogin(makeAccount(service, email, appPassword));
-      console.log(`✅ 연결 성공 (받은편지함 ${count.toLocaleString()}통)`);
+      console.log(`✅ 연결에 성공했습니다. (받은편지함 ${count.toLocaleString()}통)`);
       return { email, password: appPassword };
     } catch (error) {
       if (!(error instanceof MailError)) throw error;
       console.log(`❌ ${error.message}`);
       console.log(`   ${info.authHint}`);
-      if (!(await confirm({ message: '다시 입력할까요?', default: true }))) return undefined;
+      if (!(await confirm({ message: '다시 입력하시겠습니까?', default: true }))) return undefined;
     }
   }
 }
@@ -190,12 +201,12 @@ function readExisting(cli: ClaudeCli): Existing | undefined {
   const output = result.stdout;
   const scope = output.match(/Scope:\s*(\w+)/)?.[1]?.toLowerCase();
   if (scope !== 'user' && scope !== 'local') {
-    throw new Error(`이미 등록된 ${SERVER_NAME}의 범위(${scope ?? '알 수 없음'})를 이 설정이 다룰 수 없습니다. 기존 등록을 지우고 다시 실행해 주세요.`);
+    throw new Error(`이미 등록된 ${SERVER_NAME}의 범위(${scope ?? '알 수 없음'})를 이 설정에서 처리할 수 없습니다. 기존 등록을 삭제한 뒤 다시 실행해 주세요.`);
   }
   const env = parseEnvironment(output);
   if (!env) {
     // 기존 값을 못 읽고 다시 등록하면 다른 계정이 사라진다 (PRD §3-1).
-    throw new Error(`이미 등록된 ${SERVER_NAME}의 계정 정보를 읽지 못했습니다. 기존 등록을 지우지 않고 멈춥니다.`);
+    throw new Error(`이미 등록된 ${SERVER_NAME}의 계정 정보를 읽지 못했습니다. 기존 등록을 지우지 않고 중단합니다.`);
   }
   return { scope, env };
 }
@@ -216,13 +227,13 @@ export function parseEnvironment(output: string): Env | undefined {
 function register(cli: ClaudeCli | undefined, existing: Existing | undefined, env: Env): void {
   if (!loadAccounts(env).accounts.length) {
     if (cli && existing) runClaude(cli, ['mcp', 'remove', SERVER_NAME, '-s', existing.scope]);
-    console.log(`\n계정을 모두 삭제해서 ${SERVER_NAME} 등록을 지웠습니다. Claude Code를 다시 시작하면 반영됩니다.`);
+    console.log(`\n모든 계정을 삭제하여 ${SERVER_NAME} 등록을 해제했습니다. Claude Code를 다시 시작하면 반영됩니다.`);
     return;
   }
   const server = serverCommand();
   const unsafe = cli?.viaShell && Object.values(env).some((v) => !SHELL_SAFE_VALUE.test(v));
   if (!cli || unsafe) {
-    printManualCommand(env, server, cli ? '비밀번호에 셸이 해석할 수 있는 글자가 있어' : 'claude 명령을 찾지 못해');
+    printManualCommand(env, server, cli ? '비밀번호에 셸이 해석할 수 있는 문자가 있어' : 'claude 명령을 찾을 수 없어');
     return;
   }
   const envArgs = Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
@@ -230,10 +241,10 @@ function register(cli: ClaudeCli | undefined, existing: Existing | undefined, en
   const added = runClaude(cli, ['mcp', 'add', '--scope', 'user', SERVER_NAME, ...envArgs, '--', ...server]);
   if (added.status !== 0) {
     console.log(`\n등록에 실패했습니다: ${added.stderr.trim()}`);
-    printManualCommand(env, server, '자동 등록이 실패해');
+    printManualCommand(env, server, '자동 등록에 실패하여');
     return;
   }
-  console.log('\n✅ Claude Code에 등록했습니다. Claude Code를 다시 시작하면 메일 도구를 쓸 수 있습니다.');
+  console.log('\n✅ Claude Code에 등록했습니다. Claude Code를 다시 시작하면 메일 도구를 사용할 수 있습니다.');
 }
 
 /** npx로 실행됐으면 npx 형태로, 아니면 지금 실행 중인 파일을 등록한다 (PRD §3-1). */
@@ -247,6 +258,6 @@ function printManualCommand(env: Env, server: string[], reason: string): void {
   const envArgs = Object.keys(env)
     .map((key) => (key.endsWith('_APP_PASSWORD') ? `-e ${key}=<앱 비밀번호>` : `-e ${key}=${env[key]}`))
     .join(' ');
-  console.log(`\n${reason} 자동으로 등록하지 못했습니다. 아래 명령의 <앱 비밀번호>를 바꿔 직접 실행해 주세요.`);
+  console.log(`\n${reason} 자동으로 등록하지 못했습니다. 아래 명령의 <앱 비밀번호>를 실제 값으로 바꾸어 직접 실행해 주세요.`);
   console.log(`claude mcp add --scope user ${SERVER_NAME} ${envArgs} -- ${server.join(' ')}`);
 }

@@ -1,6 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import { loadAccounts } from '../src/accounts.js';
-import { parseEnvironment, withAccount, withoutAccount } from '../src/setup.js';
+import { EscPressed, ask, parseEnvironment, withAccount, withoutAccount } from '../src/setup.js';
+
+describe('ask (Esc 취소)', () => {
+  // 실제 질문 대신, 중단 신호를 받으면 실패하는 가짜 질문을 쓴다.
+  const waitForAbort = (context: { signal: AbortSignal }) =>
+    new Promise<string>((_resolve, reject) => context.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+
+  it('Esc를 누르면 EscPressed로 멈춘다', async () => {
+    const pending = ask(waitForAbort);
+    process.stdin.emit('keypress', '', { name: 'escape' });
+    await expect(pending).rejects.toBeInstanceOf(EscPressed);
+  });
+
+  it('다른 키는 무시하고 답을 그대로 돌려준다', async () => {
+    const pending = ask(async () => {
+      process.stdin.emit('keypress', 'a', { name: 'a' });
+      return '답';
+    });
+    await expect(pending).resolves.toBe('답');
+  });
+
+  it('질문이 끝나면 키 듣기를 그만둔다', async () => {
+    const before = process.stdin.listenerCount('keypress');
+    await ask(async () => '답');
+    expect(process.stdin.listenerCount('keypress')).toBe(before);
+  });
+});
 
 // `claude mcp get` 실제 출력 형식(Claude Code 2.1.325에서 확인)
 const OUTPUT = `korean-mail:

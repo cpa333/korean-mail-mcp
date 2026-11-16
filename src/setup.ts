@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { emitKeypressEvents } from 'node:readline';
 import { confirm, input, password, select } from '@inquirer/prompts';
 import {
   SERVICE_IDS,
@@ -38,9 +39,30 @@ interface Credentials {
   password: string;
 }
 
+export class EscPressed extends Error {}
+
+/** 질문 하나를 묻는다. 그동안 Esc를 누르면 EscPressed를 던져 지금 작업을 취소하게 한다 (PRD §3-1). */
+export async function ask<T>(prompt: (context: { signal: AbortSignal }) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const onKey = (_text: string, key?: { name?: string }) => {
+    if (key?.name === 'escape') controller.abort();
+  };
+  emitKeypressEvents(process.stdin);
+  process.stdin.on('keypress', onKey);
+  try {
+    return await prompt({ signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new EscPressed();
+    throw error;
+  } finally {
+    process.stdin.off('keypress', onKey);
+  }
+}
+
 /** PRD §3-1. 계정을 추가·변경·삭제하고, 접속을 확인하고, Claude Code에 등록한다. */
 export async function runSetup(): Promise<void> {
-  console.log('\nkorean-mail-mcp 설정\n');
+  console.log('\nkorean-mail-mcp 설정');
+  console.log('입력 중 Esc를 누르면 진행 중인 작업을 취소하고 메뉴로 돌아갑니다. Ctrl+C를 누르면 저장하지 않고 종료합니다.');
   const cli = findClaudeCli();
   const existing = cli ? readExisting(cli) : undefined;
   let env: Env = { ...existing?.env };
@@ -49,16 +71,16 @@ export async function runSetup(): Promise<void> {
   for (;;) {
     const accounts = loadAccounts(env).accounts;
     printAccounts(accounts);
-    const action = await chooseAction(accounts);
+    const action = await chooseAction(accounts).catch(escAs<Action>('cancel'));
     if (action === 'save') break;
     if (action === 'cancel') {
-      if (!changed || (await confirm({ message: '변경 내용을 저장하지 않고 종료하시겠습니까?', default: false }))) {
+      if (!changed || (await confirmQuit())) {
         console.log('\n저장하지 않고 종료합니다. 기존 등록은 그대로 유지됩니다.');
         return;
       }
       continue;
     }
-    const next = await applyAction(action, env, accounts);
+    const next = await applyAction(action, env, accounts).catch(escAs<Env | undefined>(undefined));
     if (next) {
       env = next;
       changed = true;
@@ -70,6 +92,20 @@ export async function runSetup(): Promise<void> {
     return;
   }
   register(cli, existing, env);
+}
+
+/** Esc로 멈춘 질문은 정해 둔 값으로 바꾸고, 그 밖의 오류는 그대로 던진다. */
+function escAs<T>(value: T) {
+  return (error: unknown): T => {
+    if (!(error instanceof EscPressed)) throw error;
+    console.log('\n진행 중인 작업을 취소했습니다.');
+    return value;
+  };
+}
+
+async function confirmQuit(): Promise<boolean> {
+  const message = '변경 내용을 저장하지 않고 종료하시겠습니까?';
+  return ask((context) => confirm({ message, default: false }, context)).catch(escAs(false));
 }
 
 function printAccounts(accounts: Account[]): void {
@@ -85,15 +121,13 @@ async function chooseAction(accounts: Account[]): Promise<Action> {
     choices.push({ name: '비밀번호 바꾸기', value: 'password' }, { name: '계정 삭제', value: 'remove' });
   }
   choices.push({ name: '완료 (저장)', value: 'save' }, { name: '취소 (저장 안 함)', value: 'cancel' });
-  return select({ message: '원하는 작업을 선택해 주세요.', choices });
+  return ask((context) => select({ message: '원하는 작업을 선택해 주세요.', choices }, context));
 }
 
 async function applyAction(action: 'add' | 'password' | 'remove', env: Env, accounts: Account[]): Promise<Env | undefined> {
   if (action === 'add') {
-    const service = await select<ServiceId>({
-      message: '추가할 메일 서비스를 선택해 주세요.',
-      choices: SERVICE_IDS.map((id) => ({ name: serviceOf(id).label, value: id })),
-    });
+    const choices = SERVICE_IDS.map((id) => ({ name: serviceOf(id).label, value: id }));
+    const service = await ask((context) => select<ServiceId>({ message: '추가할 메일 서비스를 선택해 주세요.', choices }, context));
     const credentials = await askCredentials(service);
     if (!credentials) return undefined;
     if (accounts.some((a) => sameEmail(a.email, credentials.email))) console.log('이미 등록된 주소이므로 비밀번호를 변경합니다.');
@@ -110,12 +144,13 @@ async function applyAction(action: 'add' | 'password' | 'remove', env: Env, acco
   }
   const serviceLabel = serviceOf(account.service).label;
   const message = `${account.email} 계정을 이 MCP에서 삭제하시겠습니까? (${serviceLabel} 계정과 메일은 그대로 유지됩니다)`;
-  if (!(await confirm({ message, default: false }))) return undefined;
+  if (!(await ask((context) => confirm({ message, default: false }, context)))) return undefined;
   return withoutAccount(env, account);
 }
 
 async function chooseAccount(accounts: Account[], message: string): Promise<Account> {
-  return select({ message, choices: accounts.map((a) => ({ name: a.label, value: a })) });
+  const choices = accounts.map((a) => ({ name: a.label, value: a }));
+  return ask((context) => select({ message, choices }, context));
 }
 
 /** 같은 주소가 있으면 그 자리의 값을 바꾸고, 없으면 서비스의 빈 번호에 더한다 (PRD §4). */
@@ -138,18 +173,16 @@ async function askCredentials(service: ServiceId, fixedEmail?: string): Promise<
   console.log(`\n[${info.label} 연결 준비]`);
   for (const step of info.setupSteps) console.log(` ${step}`);
   console.log(` 자세한 안내: ${info.guideUrl}\n`);
-  if (await confirm({ message: '자세한 안내 페이지를 브라우저로 여시겠습니까?', default: true })) openBrowser(info.guideUrl);
+  const openGuide = await ask((context) =>
+    confirm({ message: '자세한 안내 페이지를 브라우저로 여시겠습니까?', default: true }, context),
+  );
+  if (openGuide) openBrowser(info.guideUrl);
 
   for (;;) {
-    const email =
-      fixedEmail ??
-      (
-        await input({
-          message: `${info.label} 메일 주소를 입력해 주세요.`,
-          validate: (v) => v.includes('@') || '메일 주소 전체를 입력해 주세요(예: me@naver.com).',
-        })
-      ).trim();
-    const appPassword = (await password({ message: `${email}의 앱 비밀번호를 입력해 주세요.`, mask: '*' })).trim();
+    const email = fixedEmail ?? (await askEmail(info.label));
+    const appPassword = (
+      await ask((context) => password({ message: `${email}의 앱 비밀번호를 입력해 주세요.`, mask: '*' }, context))
+    ).trim();
     console.log('접속을 확인하고 있습니다...');
     try {
       const count = await checkLogin(makeAccount(service, email, appPassword));
@@ -159,9 +192,22 @@ async function askCredentials(service: ServiceId, fixedEmail?: string): Promise<
       if (!(error instanceof MailError)) throw error;
       console.log(`❌ ${error.message}`);
       console.log(`   ${info.authHint}`);
-      if (!(await confirm({ message: '다시 입력하시겠습니까?', default: true }))) return undefined;
+      if (!(await ask((context) => confirm({ message: '다시 입력하시겠습니까?', default: true }, context)))) return undefined;
     }
   }
+}
+
+async function askEmail(serviceLabel: string): Promise<string> {
+  const answer = await ask((context) =>
+    input(
+      {
+        message: `${serviceLabel} 메일 주소를 입력해 주세요.`,
+        validate: (v) => v.includes('@') || '메일 주소 전체를 입력해 주세요(예: me@naver.com).',
+      },
+      context,
+    ),
+  );
+  return answer.trim();
 }
 
 function openBrowser(url: string): void {

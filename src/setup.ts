@@ -80,14 +80,11 @@ function printAccounts(accounts: Account[]): void {
 }
 
 async function chooseAction(accounts: Account[]): Promise<Action> {
-  const choices: { name: string; value: Action }[] = [{ name: '계정을 추가합니다', value: 'add' }];
+  const choices: { name: string; value: Action }[] = [{ name: '계정 추가', value: 'add' }];
   if (accounts.length) {
-    choices.push({ name: '비밀번호를 변경합니다', value: 'password' }, { name: '계정을 삭제합니다', value: 'remove' });
+    choices.push({ name: '비밀번호 바꾸기', value: 'password' }, { name: '계정 삭제', value: 'remove' });
   }
-  choices.push(
-    { name: '완료: 변경 내용을 저장하고 종료합니다', value: 'save' },
-    { name: '취소: 저장하지 않고 종료합니다', value: 'cancel' },
-  );
+  choices.push({ name: '완료 (저장)', value: 'save' }, { name: '취소 (저장 안 함)', value: 'cancel' });
   return select({ message: '원하는 작업을 선택해 주세요.', choices });
 }
 
